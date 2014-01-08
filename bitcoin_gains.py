@@ -64,6 +64,8 @@ class TransactionParser:
     def merge_some(self, transactions):
         # returns list[Transaction]
         return [self.merge(transactions)]
+    def default_account(self):
+        return self.__class__.__name__.replace('Parser', '')
     def check_complete(self):
         pass
 
@@ -127,7 +129,10 @@ class CoinbaseParser(CsvParser):
             # Coinbase has two header lines.
             return None
         timestamp, _, btc, to, note, total, total_currency = row[:7]
-        timestamp = time.strptime(timestamp[:19], '%Y-%m-%d %H:%M:%S')
+        date, hour, zone = timestamp.split()
+        timestamp = time.strptime(date + " " + hour, '%Y-%m-%d %H:%M:%S')
+        offset = int(zone[:-2]) * 3600 + int(zone[-2:]) * 60
+        timestamp = time.localtime(time.mktime(timestamp) - offset)
         if '$' in note:
             # It's a buy/sell
             if total:
@@ -204,7 +209,7 @@ class MtGoxParser(CsvParser):
         merged = Transaction(transactions[0].timestamp, list(types)[0], None, None, None, id=transactions[0].id)
         merged.parser = transactions[0].parser
         for t in transactions:
-            for attr in ('btc', 'usd', 'fee_usd', 'fee_btc', 'price'):
+            for attr in ('account', 'btc', 'usd', 'fee_usd', 'fee_btc', 'price'):
                 if getattr(t, attr):
                     setattr(merged, attr, getattr(t, attr))
         try:
@@ -242,7 +247,7 @@ def decimal_or_none(o):
     return None if o is None else decimal.Decimal(o)
 
 class Transaction():
-    def __init__(self, timestamp, type, btc, usd, price=None, fee_usd=0, fee_btc=0, info=None, id=None):
+    def __init__(self, timestamp, type, btc, usd, price=None, fee_usd=0, fee_btc=0, info=None, id=None, account=None):
         self.timestamp = timestamp
         self.type = type
         self.btc = decimal_or_none(btc)
@@ -256,12 +261,13 @@ class Transaction():
         if id is None:
             id = unique()
         self.id = id
+        self.account = account
 
     def __cmp__(left, right):
         return cmp(left.timestamp, right.timestamp) or cmp(left.id, right.id)
 
     def __str__(self):
-        return "%s(%s, %s, %s, %s)" % (self.type, time.strftime('%Y-%m-%d', self.timestamp), self.usd, self.btc, self.parser.__class__.__name__) + self.id
+        return "%s(%s, %s, %s, %s)" % (self.type, time.strftime('%Y-%m-%d %H:%M:%S', self.timestamp), self.usd, self.btc, self.account)
 
     __repr__ = __str__
 
@@ -273,11 +279,11 @@ class Lot:
         self.price = usd / btc
         self.transaction = transaction
 
-    def sell(self, btc):
-        if btc > self.btc:
-            return None
-        else:
-            return Lot(self.timestamp, self.btc - btc, self.usd - roundd(self.price * btc, 2), self.transaction)
+    def split(self, btc):
+        assert 0 < btc < self.btc
+        usd = roundd(self.price * btc, 2)
+        return (Lot(self.timestamp, btc, usd, self.transaction),
+                Lot(self.timestamp, self.btc - btc, self.usd - usd, self.transaction))
 
     def __cmp__(left, right):
         if parsed_args.method == 'fifo':
@@ -305,7 +311,7 @@ prices = {}
 def fmv(timestamp):
     format = None
     if not prices:
-        print "Looking up daily low/high..."
+        print "Fetching fair market values...",
         for line in (urllib2.urlopen if '://' in parsed_args.fmv_url else open)(parsed_args.fmv_url):
             lint = line.strip()
             if not line:
@@ -340,6 +346,8 @@ def main(args):
                 print file, parser
                 for transaction in parser.parse_file(file):
                     transaction.parser = parser
+                    if transaction.account is None:
+                        transaction.account = parser.default_account()
                     all.append(transaction)
                 break
         else:
@@ -364,9 +372,13 @@ def main(args):
             matches = deposits.get(-t.btc, ())
             for candidate in matches:
                 if abs(time.mktime(candidate.timestamp) - time.mktime(t.timestamp)) < args.transfer_window_hours * 3600:
+                    matches.remove(candidate)
                     all.remove(t)
                     all.remove(candidate)
-                    matches.remove(candidate)
+                    transfer = Transaction(t.timestamp, 'transfer', t.btc, 0, fee_usd=t.fee_usd)
+                    transfer.account = t.account
+                    transfer.dest_account = candidate.account
+                    all.append(transfer)
                     # todo: fee?
                     print 'match', t, candidate
                     break
@@ -376,45 +388,54 @@ def main(args):
 
     pprint.pprint([(key, value) for key, value in deposits.items() if value])
     for t in all:
-        if t.type != 'trade':
+        if t.type not in ('trade', 'transfer'):
             print t
 
     total_cost = 0
-    total_btc = 0
+    account_btc = defaultdict(int)
     gains = 0
     long_term_gains = 0
 
-    lots = Heap()
+    lots = defaultdict(Heap)
     all.sort()
-    for t in all:
-        print t
+    pprint.pprint(all[25:35])
+    print
+    for ix, t in enumerate(all):
+        print ix, t
         if t.type == 'trade':
             usd, btc = t.usd + t.fee_usd, t.btc
+        elif t.type == 'transfer':
+            usd, btc = 0, t.btc
         else:
             btc = t.btc
             usd = roundd(-(t.price or fmv(t.timestamp)) * btc, 2)
-        total_btc += btc
+        account_btc[t.account] += btc
+        if t.type == 'transfer':
+            account_btc[t.dest_account] -= t.btc
         print "btc", btc, "usd", usd
         if btc > 0:
-            lots.push(Lot(t.timestamp, btc, -usd, t))
+            lots[t.account].push(Lot(t.timestamp, btc, -usd, t))
             total_cost -= usd
         else:
             btc = -btc
             gains += usd
             while btc > 0:
-                lot = lots.pop()
+                lot = lots[t.account].pop()
                 print lot
                 if lot.btc <= btc:
-                    gains -= lot.usd
-                    total_cost -= lot.usd
-                    btc -= lot.btc
+                    sold = lot
                 else:
-                    remaining = lot.sell(btc)
-                    gains -= lot.usd - remaining.usd
-                    total_cost -= lot.usd - remaining.usd
-                    lots.push(remaining)
-                    btc = 0
+                    sold, remaining = lot.split(btc)
+                    lots[t.account].push(remaining)
+                btc -= sold.btc
+                if t.type == 'transfer':
+                    lots[t.dest_account].push(sold)
+                else:
+                    gains -= sold.usd
+                    total_cost -= sold.usd
         market_value = fmv(t.timestamp)
+        total_btc = sum(account_btc.values())
+        print account_btc
         print "total_btc", total_btc, "total_cost", total_cost, "market_value", market_value
         print "gains", gains, "unrealized_gains", market_value * total_btc - total_cost, "total", gains + market_value * total_btc - total_cost
         print
@@ -424,8 +445,10 @@ def main(args):
     print "gains", gains, "unrealized_gains", market_value * total_btc - total_cost
     print
 
-    while len(lots):
-        print lots.pop()
+    for account, account_lots in lots.items():
+        print account
+        while account_lots:
+            print account_lots.pop()
 
 
 
