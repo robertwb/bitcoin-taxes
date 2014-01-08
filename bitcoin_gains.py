@@ -37,7 +37,7 @@ parser.add_argument('histories', metavar='FILE', nargs='+',
 #parser.add_argument('--fmv', dest='fmv_url', default='./per_day_all_time_history.csv',
 #                   help='fair market value prices url')
 # https://blockchain.info/charts/market-price?showDataPoints=false&timespan=all&show_header=true&daysAverageString=1&scale=0&format=csv&address=
-parser.add_argument('--fmv', dest='fmv_url', default='./blockchaing-market-price.csv',
+parser.add_argument('--fmv_url', dest='fmv_url', default='./blockchaing-market-price.csv',
                    help='fair market value prices url')
 
 parser.add_argument('--data', dest='data', default='data.json',
@@ -46,6 +46,9 @@ parser.add_argument('--data', dest='data', default='data.json',
 parser.add_argument('--transfer_window_hours', default=24)
 
 parser.add_argument('--method', default='fifo', help='used to select which lot to sell; one of fifo, lifo, lowest, highest')
+
+parser.add_argument("-y", "--confirm_all", help="don't prompt the user to confirm external transfer details",
+                    action="store_true")
 
 class TransactionParser:
     def can_parse(self, filename):
@@ -61,6 +64,8 @@ class TransactionParser:
     def merge_some(self, transactions):
         # returns list[Transaction]
         return [self.merge(transactions)]
+    def check_complete(self):
+        pass
 
 class BitcoindParser(TransactionParser):
     def can_parse(self, filename):
@@ -146,12 +151,17 @@ class CoinbaseParser(CsvParser):
 class MtGoxParser(CsvParser):
     expected_header = 'Index,Date,Type,Info,Value,Balance'
 
+    seen_usd = 0
+    seen_btc = 0
+
     def parse_file(self, filename):
         basename = os.path.basename(filename).upper()
         if 'BTC' in basename:
             self.is_btc = True
+            self.seen_btc += 1
         elif 'USD' in basename:
             self.is_btc = False
+            self.seen_usd += 1
         else:
             raise ValueError, "mtgox must contain BTC or USD"
         for t in CsvParser.parse_file(self, filename):
@@ -213,6 +223,9 @@ class MtGoxParser(CsvParser):
             raise
         return merged
 
+    def check_complete(self):
+        if self.seen_usd != self.seen_btc:
+            raise ValueError, "Missmatched number of BTC and USD files (%s vs %s)" % (self.seen_btc, self.seen_usd)
 
 
 _unique = 0
