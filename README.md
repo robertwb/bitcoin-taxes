@@ -10,7 +10,7 @@ This code is released under the GPL, which in particular disavows all responsibi
 Method
 ------
 
-For tax purposes, this script treats bitcoin as an asset. Every sale is a taxable event, and the gains computed by taking the difference between the sale price and cost basis.  As bitcoins are bought and sold in fractional amounts, a sale's gain may be computed against one or more buys.
+For tax purposes, this script treats bitcoin as an asset. Every sale is a taxable event, and the gains computed by taking the difference between the sale price and cost basis.  As bitcoins are bought and sold in fractional amounts, a sale's gain is computed against one or more buys.
 
 The lot selection method is configurable, defaulting to FIFO (first in first out).  Deposits (e.g. from mining) are considered income unless otherwise specified, and withdrawals sales (again, unless otherwise specified).
 The suggested "fair market" value for these transfers is pulled from https://bitcoinaverage.com/charts.htm#USD|averages (as far back as it goes) and https://blockchain.info/charts/market-price for older history. 
