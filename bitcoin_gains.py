@@ -50,6 +50,8 @@ parser.add_argument('--method', default='fifo', help='used to select which lot t
 parser.add_argument("-y", "--confirm_all", help="don't prompt the user to confirm external transfer details",
                     action="store_true")
 
+parser.add_argument("--consolidate_bitcoind", help="treat bitcoind accounts as one", action="store_true")
+
 class TransactionParser:
     def can_parse(self, filename):
         # returns bool
@@ -79,10 +81,18 @@ class BitcoindParser(TransactionParser):
             item['amount'] = decimal.Decimal(item['amount']).quantize(decimal.Decimal('1e-8'))
             item['fee'] = decimal.Decimal(item.get('fee', 0)).quantize(decimal.Decimal('1e-8'))
             info = ' '.join([item.get('to', ''), item.get('comment', ''), item.get('address', '')])
+            if not parsed_args.consolidate_bitcoind:
+                account = ('bitcoind-%s' % item['account']).strip('-')
+            else:
+                account = 'bitcoind'
             if item['category'] == 'receive':
-                yield Transaction(timestamp, 'deposit', item['amount'], 0, 0, id=item['txid'], info=info)
+                yield Transaction(timestamp, 'deposit', item['amount'], 0, 0, id=item['txid'], info=info, account=account)
             elif item['category'] == 'send':
-                yield Transaction(timestamp, 'withdraw', item['amount'], 0, 0, fee_btc=item.get('fee', 0), id=item['txid'], info=info)
+                yield Transaction(timestamp, 'withdraw', item['amount'], 0, 0, fee_btc=item.get('fee', 0), id=item['txid'], info=info, account=account)
+            elif item['category'] == 'move' and item['amount'] < 0 and not parsed_args.consolidate_bitcoind:
+                t = Transaction(timestamp, 'transfer', item['amount'], 0, 0, info=info, account=account)
+                t.dest_account = ('bitcoind-%s' % item['otheraccount']).strip('-')
+                yield t
     def merge_some(self, transactions):
         # don't double-count the fee
         for t in transactions[1:]:
@@ -280,10 +290,17 @@ class Lot:
         self.transaction = transaction
 
     def split(self, btc):
-        assert 0 < btc < self.btc
-        usd = roundd(self.price * btc, 2)
-        return (Lot(self.timestamp, btc, usd, self.transaction),
-                Lot(self.timestamp, self.btc - btc, self.usd - usd, self.transaction))
+        """
+        Splits this lot into two, with the first consisting of at most btc bitcoins.
+        """
+        if btc <= 0:
+            return None, self
+        elif btc < self.btc:
+            usd = roundd(self.price * btc, 2)
+            return (Lot(self.timestamp, btc, usd, self.transaction),
+                    Lot(self.timestamp, self.btc - btc, self.usd - usd, self.transaction))
+        else:
+            return self, None
 
     def __cmp__(left, right):
         if parsed_args.method == 'fifo':
@@ -396,6 +413,17 @@ def main(args):
     gains = 0
     long_term_gains = 0
 
+    # TODO(robertwb): Make an Account class
+    def push_lot(account, lot):
+        to_sell, to_hold = lot.split(-account_btc[account])
+        if to_hold:
+            lots[account].push(to_hold)
+        if to_sell:
+            # cover short
+            return -to_sell.usd
+        else:
+            return 0
+
     lots = defaultdict(Heap)
     all.sort()
     pprint.pprint(all[25:35])
@@ -410,18 +438,27 @@ def main(args):
             btc = t.btc
             usd = roundd(-(t.price or fmv(t.timestamp)) * btc, 2)
         account_btc[t.account] += btc
-        if t.type == 'transfer':
-            account_btc[t.dest_account] -= t.btc
+#        if t.type == 'transfer':
+#            account_btc[t.dest_account] -= t.btc
         print "btc", btc, "usd", usd
         if btc > 0:
-            lots[t.account].push(Lot(t.timestamp, btc, -usd, t))
+            gains += push_lot(t.account, Lot(t.timestamp, btc, -usd, t))
             total_cost -= usd
         else:
             btc = -btc
             gains += usd
             while btc > 0:
-                lot = lots[t.account].pop()
+                if not lots[t.account]:
+                    # The default account can go negative, treat as a short
+                    # to be covered when btc is transfered back in.
+                    # TODO(robertwb): Delay the gain until the short is covered.
+                    assert t.account == 'bitcoind'
+                    # Treat short as zero cost basis, loss will occur when count is refilled.
+                    lot = Lot(t.timestamp, btc, 0, t)
+                else:
+                    lot = lots[t.account].pop()
                 print lot
+                # TODO: Treat this as one case.
                 if lot.btc <= btc:
                     sold = lot
                 else:
@@ -429,24 +466,26 @@ def main(args):
                     lots[t.account].push(remaining)
                 btc -= sold.btc
                 if t.type == 'transfer':
-                    lots[t.dest_account].push(sold)
+                    push_lot(t.dest_account, sold)
+                    account_btc[t.dest_account] += sold.btc
                 else:
                     gains -= sold.usd
                     total_cost -= sold.usd
-        market_value = fmv(t.timestamp)
+        market_price = fmv(t.timestamp)
         total_btc = sum(account_btc.values())
         print account_btc
-        print "total_btc", total_btc, "total_cost", total_cost, "market_value", market_value
-        print "gains", gains, "unrealized_gains", market_value * total_btc - total_cost, "total", gains + market_value * total_btc - total_cost
+        print "total_btc", total_btc, "total_cost", total_cost, "market_price", market_price
+        print "gains", gains, "unrealized_gains", market_price * total_btc - total_cost, "total", gains + market_price * total_btc - total_cost
         print
 
     market_value = fmv(time.gmtime(time.time() - 24*60*60))
-    print "total_btc", total_btc, "total_cost", total_cost, "market_value", market_value
-    print "gains", gains, "unrealized_gains", market_value * total_btc - total_cost
+    print "total_btc", total_btc, "total_cost", total_cost, "market_price", market_price
+    print "gains", gains, "unrealized_gains", market_price * total_btc - total_cost
     print
 
     for account, account_lots in lots.items():
-        print account
+        print
+        print account, account_btc[account]
         while account_lots:
             print account_lots.pop()
 
