@@ -49,7 +49,7 @@ parser.add_argument('--transfer_window_hours', default=24)
 
 parser.add_argument('--method', default='fifo', help='used to select which lot to sell; one of fifo, lifo, lowest, highest')
 
-parser.add_argument("-y", "--confirm_all", help="don't prompt the user to confirm external transfer details",
+parser.add_argument("-y", "--non_interactive", help="don't prompt the user to confirm external transfer details",
                     action="store_true")
 
 parser.add_argument("--consolidate_bitcoind", help="treat bitcoind accounts as one", action="store_true")
@@ -551,4 +551,6 @@ def main(args):
 
 if __name__ == '__main__':
     parsed_args = parser.parse_args()
+    if not parsed_args.non_interactive:
+        raise NotImplementedError, "interactive"
     main(parsed_args)

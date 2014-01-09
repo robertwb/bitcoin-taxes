@@ -21,7 +21,6 @@ Use
 
 First, download all the transaction histories from all your exchanges.  Currently Bitstamp, Coinbase, and MtGox are supported, but more formats can be easily added.  Note that for MtGox both the BTC and USD files must be downloaded (with BTC or USD in the filename) as neither has the full history.  Transactions from your local wallets should also be exported via `bitcoind list transactions '*' 1000000 > local-accounts.json`.  Run the script as
 
-    python bitcoin_gains.py transaction_downloads/*.csv local-accounts.json ...
+    python bitcoin_gains.py -y transaction_downloads/*.csv local-accounts.json ...
 
-This script is interactive, it will ask questions about external transfers.  To accept all the defaults (as explained above) one can use the `-y` option.
-
+This script will be interactive, it will ask questions about external transfers.  To accept all the defaults (as explained above) one can use the `-y` option.
