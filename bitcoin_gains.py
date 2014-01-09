@@ -361,6 +361,14 @@ def fmv(timestamp):
     date = time.strftime('%Y-%m-%d', timestamp)
     return prices.get(date, 100)
 
+def is_long_term(buy, sell):
+    # Years vary in length, making this a bit messy...
+    def parts(t):
+        return [int(x) for x in time.strftime('%Y %m %d %H %M %S', t).split(' ')]
+    def plus_one_year(parts):
+        return [parts[0] + 1] + parts[1:]
+    return plus_one_year(parts(buy.timestamp)) < parts(sell.timestamp)
+
 def main(args):
 
     parsers = [BitstampParser(), MtGoxParser(), BitcoindParser(), CoinbaseParser()]
@@ -448,44 +456,46 @@ def main(args):
             btc = t.btc
             usd = roundd(-(t.price or fmv(t.timestamp)) * btc, 2)
         account_btc[t.account] += btc
-#        if t.type == 'transfer':
-#            account_btc[t.dest_account] -= t.btc
         print "btc", btc, "usd", usd
-        if btc > 0:
+        if btc == 0:
+            continue
+        elif btc > 0:
             gains += push_lot(t.account, Lot(t.timestamp, btc, -usd, t))
             total_cost -= usd
         else:
-            btc = -btc
-            gains += usd
-            while btc > 0:
+            to_sell = Lot(t.timestamp, -btc, usd, t)
+            gain = 0
+            long_term_gain = 0
+            while to_sell:
                 if not lots[t.account]:
                     # The default account can go negative, treat as a short
                     # to be covered when btc is transfered back in.
                     # TODO(robertwb): Delay the gain until the short is covered.
                     assert t.account == 'bitcoind'
                     # Treat short as zero cost basis, loss will occur when count is refilled.
-                    lot = Lot(t.timestamp, btc, 0, t)
+                    buy = Lot(t.timestamp, to_sell.btc, 0, t)
                 else:
-                    lot = lots[t.account].pop()
-                print lot
-                # TODO: Treat this as one case.
-                if lot.btc <= btc:
-                    sold = lot
-                else:
-                    sold, remaining = lot.split(btc)
+                    buy = lots[t.account].pop()
+                print buy
+                buy, remaining = buy.split(to_sell.btc)
+                if remaining:
                     lots[t.account].push(remaining)
-                btc -= sold.btc
+                sell, to_sell = to_sell.split(buy.btc)
                 if t.type == 'transfer':
-                    push_lot(t.dest_account, sold)
-                    account_btc[t.dest_account] += sold.btc
+                    push_lot(t.dest_account, buy)
+                    account_btc[t.dest_account] += buy.btc
                 else:
-                    gains -= sold.usd
-                    total_cost -= sold.usd
+                    gain += sell.usd - buy.usd
+                    if is_long_term(buy, sell):
+                        long_term_gain += sell.usd - buy.usd
+                    total_cost -= buy.usd
+            gains += gain
+            long_term_gains += long_term_gain
         market_price = fmv(t.timestamp)
         total_btc = sum(account_btc.values())
         print account_btc
         print "total_btc", total_btc, "total_cost", total_cost, "market_price", market_price
-        print "gains", gains, "unrealized_gains", market_price * total_btc - total_cost, "total", gains + market_price * total_btc - total_cost
+        print "gains", gains, "long_term_gains", long_term_gains, "unrealized_gains", market_price * total_btc - total_cost, "total", gains + market_price * total_btc - total_cost
         print
 
     market_value = fmv(time.gmtime(time.time() - 24*60*60))
