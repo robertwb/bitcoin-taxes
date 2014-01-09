@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 """
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -168,6 +170,7 @@ class MtGoxParser(CsvParser):
 
     seen_usd = 0
     seen_btc = 0
+    seen_first = [False, False]
 
     def parse_file(self, filename):
         basename = os.path.basename(filename).upper()
@@ -183,7 +186,9 @@ class MtGoxParser(CsvParser):
             yield t
 
     def parse_row(self, row):
-        _, timestamp, type, info, value, balance = row
+        ix, timestamp, type, info, value, balance = row
+        if ix == '1':
+            self.seen_first[self.is_btc] = True
         timestamp = time.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
         value = decimal.Decimal(value)
         m = re.search(r'tid:\d+', info)
@@ -210,6 +215,7 @@ class MtGoxParser(CsvParser):
             return Transaction(timestamp, 'deposit', value, 0, 0, 0, info=info, id=id)
         else:
             raise ValueError, type
+
     def merge(self, transactions):
         if len(transactions) == 1:
             return transactions[0]
@@ -240,7 +246,9 @@ class MtGoxParser(CsvParser):
 
     def check_complete(self):
         if self.seen_usd != self.seen_btc:
-            raise ValueError, "Missmatched number of BTC and USD files (%s vs %s)" % (self.seen_btc, self.seen_usd)
+            raise ValueError, "Missmatched number of BTC and USD files (%s vs %s)." % (self.seen_btc, self.seen_usd)
+        if not all(self.seen_first):
+            raise ValueError, "Missing first transaction. (Did you download the > 3 month csv?)"
 
 
 _unique = 0
@@ -369,6 +377,8 @@ def main(args):
                 break
         else:
             raise RuntimeError, "No parser for " + file
+    for parser in parsers:
+        parser.check_complete()
 
     by_date = defaultdict(list)
     for t in all:
