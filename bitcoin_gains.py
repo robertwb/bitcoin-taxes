@@ -369,6 +369,27 @@ def is_long_term(buy, sell):
         return [parts[0] + 1] + parts[1:]
     return plus_one_year(parts(buy.timestamp)) < parts(sell.timestamp)
 
+
+class RunningReport:
+    def __init__(self, date_format):
+        self.date_format = date_format
+        self.data = {}
+    def record(self, timestamp, **values):
+        self.data[time.strftime(self.date_format, timestamp)] = values
+    def dump(self, format):
+        last = {}
+        for date in sorted(self.data):
+            data = self.data[date]
+            diff = dict((key, value-last.get(key, 0)) for key, value in data.items())
+            print format.format(date=date, **diff)
+            last = data
+    def consolidate(self, date_format):
+        report = RunningReport(date_format)
+        for date, values in sorted(self.data.items()):
+            report.record(time.strptime(date, self.date_format), **values)
+        return report
+
+
 def main(args):
 
     parsers = [BitstampParser(), MtGoxParser(), BitcoindParser(), CoinbaseParser()]
@@ -428,6 +449,7 @@ def main(args):
 
     total_cost = 0
     account_btc = defaultdict(int)
+    income = 0
     gains = 0
     long_term_gains = 0
 
@@ -445,6 +467,8 @@ def main(args):
     lots = defaultdict(Heap)
     all.sort()
     pprint.pprint(all[25:35])
+    by_month = RunningReport("%Y-%m")
+    by_year = RunningReport("%Y")
     print
     for ix, t in enumerate(all):
         print ix, t
@@ -455,6 +479,8 @@ def main(args):
         else:
             btc = t.btc
             usd = roundd(-(t.price or fmv(t.timestamp)) * btc, 2)
+        if t.type == 'deposit':
+            income -= usd
         account_btc[t.account] += btc
         print "btc", btc, "usd", usd
         if btc == 0:
@@ -497,17 +523,29 @@ def main(args):
         print "total_btc", total_btc, "total_cost", total_cost, "market_price", market_price
         print "gains", gains, "long_term_gains", long_term_gains, "unrealized_gains", market_price * total_btc - total_cost, "total", gains + market_price * total_btc - total_cost
         print
+        unrealized_gains = market_price * total_btc - total_cost
+        by_month.record(t.timestamp, income=income, gains=gains, long_term_gains=long_term_gains, unrealized_gains=unrealized_gains, total_cost=total_cost)
 
     market_value = fmv(time.gmtime(time.time() - 24*60*60))
     print "total_btc", total_btc, "total_cost", total_cost, "market_price", market_price
     print "gains", gains, "unrealized_gains", market_price * total_btc - total_cost
     print
 
-    for account, account_lots in lots.items():
+
+    for account, account_lots in sorted(lots.items()):
         print
         print account, account_btc[account]
         while account_lots:
             print account_lots.pop()
+
+    print
+    print
+    format = "{date:8} {income:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {unrealized_gains:>12.2f}"
+    print format.replace('.2f', '').format(date='date', income='income', gains='realized gains', long_term_gains='long term', unrealized_gains='unrealized')
+    by_month.dump(format)
+    print
+    print "Annual"
+    by_month.consolidate('%Y').dump(format)
 
 
 
