@@ -524,7 +524,7 @@ def main(args):
         print "gains", gains, "long_term_gains", long_term_gains, "unrealized_gains", market_price * total_btc - total_cost, "total", gains + market_price * total_btc - total_cost
         print
         unrealized_gains = market_price * total_btc - total_cost
-        by_month.record(t.timestamp, income=income, gains=gains, long_term_gains=long_term_gains, unrealized_gains=unrealized_gains, total_cost=total_cost)
+        by_month.record(t.timestamp, income=income, gains=gains, long_term_gains=long_term_gains, unrealized_gains=unrealized_gains, total_cost=total_cost, total=income+gains+unrealized_gains)
 
     market_value = fmv(time.gmtime(time.time() - 24*60*60))
     print "total_btc", total_btc, "total_cost", total_cost, "market_price", market_price
@@ -540,8 +540,8 @@ def main(args):
 
     print
     print
-    format = "{date:8} {income:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {unrealized_gains:>12.2f}"
-    print format.replace('.2f', '').format(date='date', income='income', gains='realized gains', long_term_gains='long term', unrealized_gains='unrealized')
+    format = "{date:8} {income:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
+    print format.replace('.2f', '').format(date='date', income='income', gains='realized gains', long_term_gains='long term', unrealized_gains='unrealized', total='total  ')
     by_month.dump(format)
     print
     print "Annual"
