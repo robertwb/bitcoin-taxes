@@ -28,19 +28,18 @@ import os
 import pprint
 import time
 import urllib2
+import urlparse
 
 parser = argparse.ArgumentParser(description='Compute capital gains/losses.')
 
 parser.add_argument('histories', metavar='FILE', nargs='+',
                    help='a csv or json file')
 
-#parser.add_argument('--fmv', dest='fmv_url', default='https://api.bitcoinaverage.com/history/USD/per_day_all_time_history.csv',
-#                   help='fair market value prices url')
-#parser.add_argument('--fmv', dest='fmv_url', default='./per_day_all_time_history.csv',
-#                   help='fair market value prices url')
-# https://blockchain.info/charts/market-price?showDataPoints=false&timespan=all&show_header=true&daysAverageString=1&scale=0&format=csv&address=
-parser.add_argument('--fmv_url', dest='fmv_url', default='./blockchaing-market-price.csv',
-                   help='fair market value prices url')
+parser.add_argument('--fmv_url', dest='fmv_urls',
+                    action='append',
+                    default=['https://api.bitcoinaverage.com/history/USD/per_day_all_time_history.csv',
+                             'https://blockchain.info/charts/market-price?timespan=all&daysAverageString=1&format=csv'],
+                    help='fair market value prices urls')
 
 parser.add_argument('--data', dest='data', default='data.json',
                    help='external transaction info')
@@ -342,13 +341,48 @@ class Heap:
     def __len__(self):
         return len(self.data)
 
+already_forced_download = set()
+def open_cached(url, force_download=False):
+    global already_forced_download
+    if '://' not in url:
+        # It's a (possibly relative) file path.
+        return open(url)
+    parts = urlparse.urlparse(url)
+    basename = 'cached-' + parts.hostname + '-' + parts.path.split('/')[-1]
+    if not os.path.exists(basename) or (force_download and url not in already_forced_download):
+        already_forced_download.add(url)
+        handle = urllib2.urlopen(url)
+        try:
+            open(basename, 'wb').write(handle.read())
+        except:
+            return urllib2.urlopen(url)
+    return open(basename)
+
 prices = {}
 def fmv(timestamp):
-    format = None
-    if not prices:
-        print "Fetching fair market values...",
-        for line in (urllib2.urlopen if '://' in parsed_args.fmv_url else open)(parsed_args.fmv_url):
-            lint = line.strip()
+    date = time.strftime('%Y-%m-%d', timestamp)
+    if date not in prices:
+        fetch_prices(False)
+    if date not in prices:
+        fetch_prices(True)
+    if date not in prices:
+        prev = [d for d in prices if d < date]
+        if not prev:
+            raise ValueError, "No price for %s" % date
+        else:
+            date = max(prev)
+    return prices[date]
+
+def fetch_prices(force_download=False):
+    print "Fetching fair market values..."
+    for url in reversed(parsed_args.fmv_urls):
+        if not url:
+            # Empty parameter ignores all previous.
+            break
+        print url
+        format = None
+        for line in open_cached(url):
+            line = line.strip()
             if not line:
                 continue
             if format is None:
@@ -362,14 +396,13 @@ def fmv(timestamp):
             cols = line.strip().split(',')
             if format == 'bitcoinaverage':
                 date = cols[0].split()[0]
-                prices[date] = (decimal.Decimal(cols[1]) + decimal.Decimal(cols[2])) / 2
+                price = (decimal.Decimal(cols[1]) + decimal.Decimal(cols[2])) / 2
             else:
                 date = '-'.join(reversed(cols[0].split()[0].split('/')))
                 price = cols[1]
-            prices[date] = decimal.Decimal(price)
-        print "Done"
-    date = time.strftime('%Y-%m-%d', timestamp)
-    return prices.get(date, 100)
+            if date not in prices:
+                prices[date] = decimal.Decimal(price)
+    print "Done"
 
 def is_long_term(buy, sell):
     # Years vary in length, making this a bit messy...
