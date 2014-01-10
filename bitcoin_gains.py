@@ -168,27 +168,29 @@ class CoinbaseParser(CsvParser):
 class MtGoxParser(CsvParser):
     expected_header = 'Index,Date,Type,Info,Value,Balance'
 
-    seen_usd = 0
-    seen_btc = 0
-    seen_first = [False, False]
+    def __init__(self):
+        self.seen_file_count = [0, 0]
+        self.seen_transactions = [set(), set()]
 
     def parse_file(self, filename):
         basename = os.path.basename(filename).upper()
         if 'BTC' in basename:
             self.is_btc = True
-            self.seen_btc += 1
         elif 'USD' in basename:
             self.is_btc = False
-            self.seen_usd += 1
         else:
             raise ValueError, "mtgox must contain BTC or USD"
+        self.seen_file_count[self.is_btc] += 1
         for t in CsvParser.parse_file(self, filename):
             yield t
 
     def parse_row(self, row):
         ix, timestamp, type, info, value, balance = row
-        if ix == '1':
-            self.seen_first[self.is_btc] = True
+        ix = int(ix)
+        if ix in self.seen_transactions[self.is_btc]:
+            raise ValueError, "Duplicate tranaction: %s" % ix
+        else:
+            self.seen_transactions[self.is_btc].add(ix)
         timestamp = time.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
         value = decimal.Decimal(value)
         m = re.search(r'tid:\d+', info)
@@ -245,11 +247,19 @@ class MtGoxParser(CsvParser):
         return merged
 
     def check_complete(self):
-        if self.seen_usd != self.seen_btc:
-            raise ValueError, "Missmatched number of BTC and USD files (%s vs %s)." % (self.seen_btc, self.seen_usd)
-        if not all(self.seen_first):
-            raise ValueError, "Missing first transaction. (Did you download the > 3 month csv?)"
-
+        if self.seen_file_count[0] != self.seen_file_count[1]:
+            raise ValueError, "Missmatched number of BTC and USD files (%s vs %s)." % tuple(seen_file_count)
+        usd_or_btc = ['USD', 'BTC']
+        for is_btc in (True, False):
+            transactions = self.seen_transactions[is_btc]
+            if len(transactions) != max(transactions):
+                for gap_start in range(1, len(transactions)):
+                    if gap_start not in transactions:
+                        break
+                for gap_end in range(gap_start, max(transactions)):
+                    if gap_end in transactions:
+                        break
+                raise ValueError, "Missing transactions in mtgox %s history (%s to %s)." % (usd_or_btc[is_btc], gap_start, gap_end-1)
 
 _unique = 0
 def unique():
