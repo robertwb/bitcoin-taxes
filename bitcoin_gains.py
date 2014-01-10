@@ -511,7 +511,6 @@ def main(args):
     all.sort()
     pprint.pprint(all[25:35])
     by_month = RunningReport("%Y-%m")
-    by_year = RunningReport("%Y")
     print
     for ix, t in enumerate(all):
         print ix, t
@@ -589,7 +588,8 @@ def main(args):
     print
     print "Annual"
     by_month.consolidate('%Y').dump(format)
-
+    print
+    by_month.consolidate('All time').dump(format)
 
 
 if __name__ == '__main__':
