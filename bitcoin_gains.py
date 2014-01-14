@@ -26,6 +26,7 @@ import json
 import re
 import os
 import pprint
+import sys
 import time
 import urllib2
 import urlparse
@@ -53,7 +54,10 @@ parser.add_argument("-y", "--non_interactive", help="don't prompt the user to co
 
 parser.add_argument("--consolidate_bitcoind", help="treat bitcoind accounts as one", action="store_true")
 
+parser.add_argument("--external_transactions_file", default="external_transactions.json")
+
 class TransactionParser:
+    counter = 0
     def can_parse(self, filename):
         # returns bool
         raise NotImplementedError
@@ -71,6 +75,9 @@ class TransactionParser:
         return self.__class__.__name__.replace('Parser', '')
     def check_complete(self):
         pass
+    def unique(self):
+        self.counter += 1
+        return "%s:%s" % (self.default_account(), self.counter)
 
 class BitcoindParser(TransactionParser):
     def can_parse(self, filename):
@@ -194,9 +201,9 @@ class MtGoxParser(CsvParser):
         value = decimal.Decimal(value)
         m = re.search(r'tid:\d+', info)
         if m:
-            id = m.group(0)
+            id = "MtGox:%s" % m.group(0)
         else:
-            id = unique()
+            id = "MtGox[%s]:%s" % (('UDSD', 'BTC')[self.is_btc], ix)
         if type == 'out':
             return Transaction(timestamp, 'trade', -value, 0, 0, 0, info=info, id=id)
         elif type == 'in':
@@ -260,11 +267,6 @@ class MtGoxParser(CsvParser):
                         break
                 raise ValueError, "Missing transactions in mtgox %s history (%s to %s)." % (usd_or_btc[is_btc], gap_start, gap_end-1)
 
-_unique = 0
-def unique():
-    global _unique
-    _unique += 1
-    return "unique:%s" % _unique
 
 tenth = decimal.Decimal('0.1')
 def roundd(x, digits):
@@ -272,6 +274,9 @@ def roundd(x, digits):
 
 def decimal_or_none(o):
     return None if o is None else decimal.Decimal(o)
+
+def strip_or_none(o):
+    return o.strip() if o else o
 
 class Transaction():
     def __init__(self, timestamp, type, btc, usd, price=None, fee_usd=0, fee_btc=0, info=None, id=None, account=None):
@@ -282,11 +287,9 @@ class Transaction():
         self.price = decimal_or_none(price)
         self.fee_usd = decimal_or_none(fee_usd)
         self.fee_btc = decimal_or_none(fee_btc)
-        self.info = info
+        self.info = strip_or_none(info)
         if self.btc and self.usd and self.price is None:
             self.price = self.usd / self.btc
-        if id is None:
-            id = unique()
         self.id = id
         self.account = account
 
@@ -432,6 +435,48 @@ class RunningReport:
             report.record(time.strptime(date, self.date_format), **values)
         return report
 
+def re_input(prompt, regex, flags, default):
+    if parsed_args.non_interactive:
+        return default
+    r = None
+    while r is None or not re.match(regex, r, flags):
+        r = raw_input(prompt)
+        if r == '':
+            return default
+    return r
+
+def option_input(prompt, options, default=None):
+    regex = '|'.join("%s(%s)?" % (option[0], option[1:]) for option in options)
+    if default != None:
+        prompt += '[%s] ' % default.upper()[0]
+    res = re_input(prompt, regex, re.I, default=default)
+    for option in options:
+        if option.upper().startswith(res.upper()):
+            return option
+
+def value_input(prompt, btc, price):
+    usd = roundd(btc * price, 2)
+    value = re_input("%s [$%s or @%s] " % (prompt, usd, price), r"@\d+(.\d+)?|\$\d+(\.\d+)?", re.I, "@%s" % price)
+    if value[0] == '@':
+        price = decimal.Decimal(value[1:])
+        usd = roundd(btc * price, 2)
+    else:
+        assert value[0] == '$'
+        usd = decimal.Decimal(value[1:])
+        price = usd / btc
+    return usd, price
+
+
+def load_external():
+    if os.path.exists(parsed_args.external_transactions_file):
+        return json.load(open(parsed_args.external_transactions_file))
+    else:
+        return {}
+
+def save_external(external):
+    if not parsed_args.non_interactive:
+        json.dump(external, open(parsed_args.external_transactions_file, 'w'), indent=4, sort_keys=True)
+
 
 def main(args):
 
@@ -443,6 +488,8 @@ def main(args):
                 print file, parser
                 for transaction in parser.parse_file(file):
                     transaction.parser = parser
+                    if transaction.id is None:
+                        transaction.id = parser.unique()
                     if transaction.account is None:
                         transaction.account = parser.default_account()
                     all.append(transaction)
@@ -507,32 +554,96 @@ def main(args):
         else:
             return 0
 
+    external = load_external()
     lots = defaultdict(Heap)
     all.sort()
     pprint.pprint(all[25:35])
     by_month = RunningReport("%Y-%m")
     by_year = RunningReport("%Y")
+    transfered_out = []
     print
     for ix, t in enumerate(all):
         print ix, t
+        timestamp = t.timestamp
         if t.type == 'trade':
             usd, btc = t.usd + t.fee_usd, t.btc
         elif t.type == 'transfer':
             usd, btc = 0, t.btc
         else:
             btc = t.btc
-            usd = roundd(-(t.price or fmv(t.timestamp)) * btc, 2)
-        if t.type == 'deposit':
-            income -= usd
+            if t.id in external:
+                data = external[t.id]
+                usd, price = decimal.Decimal(data['usd']), decimal.Decimal(data['price'])
+                purchase_date = time.strptime(data['purchase_date'], '%Y-%m-%d %H:%M:%S')
+                if data['type'] == 'transfer_out':
+                    t.type = 'transfer_out'
+            else:
+                price = t.price or fmv(t.timestamp)
+                approx_usd = roundd(-price * btc, 2)
+                print
+                print "On %s you %s %s btc (~$%s at %s/btc)." % (
+                    time.strftime("%a, %d %b %Y %H:%M:%S +0000", t.timestamp),
+                    ['sent', 'recieved'][t.btc > 0],
+                    abs(t.btc),
+                    approx_usd,
+                    price)
+                print t.info
+                if btc == 0:
+                    continue
+                elif btc > 0:
+                    type = option_input("Is this Income, Transfer or a Buy: ", ['income', 'transfer', 'buy', 'abort', 'quit'], default='income')
+                    if type in ('quit', 'abort'):
+                        if type == 'quit':
+                            save_external(external)
+                        sys.exit(1)
+                    elif type == 'transfer':
+                        date = re_input("Purchase date: [%s]" % time.strftime('%Y-%m-%d', t.timestamp), r"\d\d-\d\d-\d\d\d\d", 0, default='')
+                        if date:
+                            timestamp = time.strptime(date, '%Y-%m-%d')
+                        else:
+                            timestamp = t.timestamp
+                        usd, price = value_input("Cost basis: ", btc, price)
+                        usd = -usd
+                    else:
+                        usd, price = value_input("How much was this worth in USD? ", btc, price)
+                        usd = -usd
+                        if type == 'income':
+                            income -= usd
+                else:
+                    if t.type == 'fee':
+                        type = fee
+                        usd = approx_usd
+                    else:
+                        type = option_input("Is this a Sale, Purchase, Expense, or Transfer: ", ['sale', 'purchase', 'transfer', 'expense', 'abort', 'quit'], default='purchase')
+                        if type in ('quit', 'abort'):
+                            if type == 'quit':
+                                save_external(external)
+                            sys.exit(1)
+                        elif type == 'transfer':
+                            # Mutate!
+                            type = t.type = 'transfer_out'
+                            usd = 0
+                        else:
+                            usd, price = value_input("How much was this worth in USD? ", abs(btc), price)
+                            if type == 'expense':
+                                income -= usd
+                if type != 'fee' and not args.non_interactive:
+                    note = raw_input('Note: ')
+                    external[t.id] = { 'usd': str(usd), 'btc': str(btc), 'price': str(price),
+                                       'type': type, 'note': note, 'info': t.info, 'account': t.account,
+                                       'timestamp': time.strftime('%Y-%m-%d %H:%M:%S', t.timestamp),
+                                       'purchase_date': time.strftime('%Y-%m-%d %H:%M:%S', timestamp) }
+
+        print t
         account_btc[t.account] += btc
         print "btc", btc, "usd", usd
         if btc == 0:
             continue
         elif btc > 0:
-            gains += push_lot(t.account, Lot(t.timestamp, btc, -usd, t))
+            gains += push_lot(t.account, Lot(timestamp, btc, -usd, t))
             total_cost -= usd
         else:
-            to_sell = Lot(t.timestamp, -btc, usd, t)
+            to_sell = Lot(timestamp, -btc, usd, t)
             gain = 0
             long_term_gain = 0
             while to_sell:
@@ -558,6 +669,8 @@ def main(args):
                     if is_long_term(buy, sell):
                         long_term_gain += sell.usd - buy.usd
                     total_cost -= buy.usd
+                    if t.type == 'transfer_out':
+                        transfered_out.append((t, buy))
             gains += gain
             long_term_gains += long_term_gain
         market_price = fmv(t.timestamp)
@@ -568,6 +681,7 @@ def main(args):
         print
         unrealized_gains = market_price * total_btc - total_cost
         by_month.record(t.timestamp, income=income, gains=gains, long_term_gains=long_term_gains, unrealized_gains=unrealized_gains, total_cost=total_cost, total=income+gains+unrealized_gains)
+    save_external(external)
 
     market_value = fmv(time.gmtime(time.time() - 24*60*60))
     print "total_btc", total_btc, "total_cost", total_cost, "market_price", market_price
@@ -581,6 +695,22 @@ def main(args):
         while account_lots:
             print account_lots.pop()
 
+    if transfered_out:
+        print
+        print
+        print "Transfered out (not yet taxed):"
+        last_t = None
+        for t, lot in transfered_out:
+            if last_t is None or t != last_t:
+                print
+                print time.strftime("%Y-%m-%d %H:%M:%S", t.timestamp), t.btc
+                if t.info:
+                    print "   ", t.info
+                if external[t.id]['note']:
+                    print "   ", external[t.id]['note']
+                last_t = t
+
+            print "   ", lot
     print
     print
     format = "{date:8} {income:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
@@ -592,8 +722,8 @@ def main(args):
 
 
 
+
+
 if __name__ == '__main__':
     parsed_args = parser.parse_args()
-    if not parsed_args.non_interactive:
-        raise NotImplementedError, "interactive"
     main(parsed_args)
