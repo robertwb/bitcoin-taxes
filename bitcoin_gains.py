@@ -297,7 +297,13 @@ class Transaction():
         return cmp(left.timestamp, right.timestamp) or cmp(left.id, right.id)
 
     def __str__(self):
-        return "%s(%s, %s, %s, %s)" % (self.type, time.strftime('%Y-%m-%d %H:%M:%S', self.timestamp), self.usd, self.btc, self.account)
+        if self.fee_btc:
+            fee_str = ", fee=%s BTC" % self.fee_btc
+        elif self.fee_usd:
+            fee_str = ", fee=%s USD" % self.fee_usd
+        else:
+            fee_str = ""
+        return "%s(%s, %s, %s, %s%s)" % (self.type, time.strftime('%Y-%m-%d %H:%M:%S', self.timestamp), self.usd, self.btc, self.account, fee_str)
 
     __repr__ = __str__
 
@@ -565,7 +571,7 @@ def main(args):
         print ix, t
         timestamp = t.timestamp
         if t.type == 'trade':
-            usd, btc = t.usd + t.fee_usd, t.btc
+            usd, btc = t.usd - t.fee_usd, t.btc
         elif t.type == 'transfer':
             usd, btc = 0, t.btc
         else:
@@ -584,7 +590,7 @@ def main(args):
                     time.strftime("%a, %d %b %Y %H:%M:%S +0000", t.timestamp),
                     ['sent', 'recieved'][t.btc > 0],
                     abs(t.btc),
-                    approx_usd,
+                    abs(approx_usd),
                     price)
                 print t.info
                 if btc == 0:
