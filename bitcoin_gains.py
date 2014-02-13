@@ -546,6 +546,7 @@ def main(args):
     total_cost = 0
     account_btc = defaultdict(int)
     income = 0
+    income_txn = []
     gains = 0
     long_term_gains = 0
 
@@ -613,6 +614,7 @@ def main(args):
                         usd, price = value_input("How much was this worth in USD? ", btc, price)
                         usd = -usd
                         if type == 'income':
+                            income_txn.append((time.strftime('%Y-%m-%d', t.timestamp), -usd))
                             income -= usd
                 else:
                     if t.type == 'fee':
@@ -631,6 +633,7 @@ def main(args):
                         else:
                             usd, price = value_input("How much was this worth in USD? ", abs(btc), price)
                             if type == 'expense':
+                                income_txn.append((time.strftime('%Y-%m-%d', t.timestamp), -usd))
                                 income -= usd
                 if type != 'fee' and not args.non_interactive:
                     note = raw_input('Note: ')
@@ -692,6 +695,10 @@ def main(args):
     print "total_btc", total_btc, "total_cost", total_cost, "market_price", market_price
     print "gains", gains, "unrealized_gains", market_price * total_btc - total_cost
     print
+
+    print "Income"
+    for date, amount in income_txn:
+        print "{date:8} {amount:>12.2f}".format(date=date, amount=amount)
 
 
     for account, account_lots in sorted(lots.items()):
