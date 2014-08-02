@@ -553,6 +553,8 @@ def main(args):
     income_txn = []
     gains = 0
     long_term_gains = 0
+    total_sell = 0
+    total_cost_basis = 0
 
     # TODO(robertwb): Make an Account class
     def push_lot(account, lot):
@@ -646,6 +648,7 @@ def main(args):
                                        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S', t.timestamp),
                                        'purchase_date': time.strftime('%Y-%m-%d %H:%M:%S', timestamp) }
 
+
         print t
         account_btc[t.account] += btc
         print "btc", btc, "usd", usd
@@ -678,6 +681,9 @@ def main(args):
                     account_btc[t.dest_account] += buy.btc
                 else:
                     gain += sell.usd - buy.usd
+                    # TODO: split into long, short term.
+                    total_sell += sell.usd
+                    total_cost_basis += buy.usd
                     if is_long_term(buy, sell):
                         long_term_gain += sell.usd - buy.usd
                     total_cost -= buy.usd
@@ -692,7 +698,8 @@ def main(args):
         print "gains", gains, "long_term_gains", long_term_gains, "unrealized_gains", market_price * total_btc - total_cost, "total", gains + market_price * total_btc - total_cost
         print
         unrealized_gains = market_price * total_btc - total_cost
-        by_month.record(t.timestamp, income=income, gains=gains, long_term_gains=long_term_gains, unrealized_gains=unrealized_gains, total_cost=total_cost, total=income+gains+unrealized_gains)
+        by_month.record(t.timestamp, income=income, gains=gains, long_term_gains=long_term_gains, unrealized_gains=unrealized_gains, total_cost=total_cost, total=income+gains+unrealized_gains,
+                        total_sell=total_sell, total_cost_basis=total_cost_basis)
     save_external(external)
 
     market_value = fmv(time.gmtime(time.time() - 24*60*60))
@@ -729,8 +736,10 @@ def main(args):
             print "   ", lot
     print
     print
-    format = "{date:8} {income:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
-    print format.replace('.2f', '').format(date='date', income='income', gains='realized gains', long_term_gains='long term', unrealized_gains='unrealized', total='total  ')
+#    format = "{date:8} {income:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
+#    print format.replace('.2f', '').format(date='date', income='income', gains='realized gains', long_term_gains='long term', unrealized_gains='unrealized', total='total  ')
+    format = "{date:8} {income:>12.2f} {total_cost_basis:>12.2f} {total_sell:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
+    print format.replace('.2f', '').format(date='date', income='income', gains='realized gains', long_term_gains='long term', unrealized_gains='unrealized', total='total  ', total_sell='sell', total_cost_basis='buy')
     by_month.dump(format)
     print
     print "Annual"
