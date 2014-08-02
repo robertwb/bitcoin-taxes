@@ -140,13 +140,17 @@ class BitstampParser(CsvParser):
             raise ValueError, type
 
 class CoinbaseParser(CsvParser):
-    expected_header = r'User,.*,[0-9a-f]+'
+    expected_header = r'(User,.*,[0-9a-f]+)|(^Transactions$)'
+    started = False
 
     def parse_row(self, row):
-        if ','.join(row).startswith('Timestamp,Balance,BTC Amount'):
-            # Coinbase has two header lines.
-            return None
-        timestamp, _, btc, to, note, total, total_currency = row[:7]
+        if not self.started:
+            raw_row = ",".join(row)
+            if raw_row.startswith('Timestamp,Balance,BTC Amount') or raw_row.startswith('User,'):
+                # Coinbase has multiple header lines.
+                return None
+            self.started = True
+        timestamp, _, btc, to, note, _, total, total_currency = row[:8]
         date, hour, zone = timestamp.split()
         timestamp = time.strptime(date + " " + hour, '%Y-%m-%d %H:%M:%S')
         offset = int(zone[:-2]) * 3600 + int(zone[-2:]) * 60
