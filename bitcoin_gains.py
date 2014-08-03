@@ -56,6 +56,8 @@ parser.add_argument("--consolidate_bitcoind", help="treat bitcoind accounts as o
 
 parser.add_argument("--external_transactions_file", default="external_transactions.json")
 
+parser.add_argument("--flat_transactions_file", default="all_transactions.csv")
+
 class TransactionParser:
     counter = 0
     def can_parse(self, filename):
@@ -259,6 +261,8 @@ class MtGoxParser(CsvParser):
     def check_complete(self):
         if self.seen_file_count[0] != self.seen_file_count[1]:
             raise ValueError, "Missmatched number of BTC and USD files (%s vs %s)." % tuple(seen_file_count)
+        if self.seen_file_count[0] == self.seen_file_count[1] == 0:
+            return
         usd_or_btc = ['USD', 'BTC']
         for is_btc in (True, False):
             transactions = self.seen_transactions[is_btc]
@@ -310,6 +314,22 @@ class Transaction():
         return "%s(%s, %s, %s, %s%s)" % (self.type, time.strftime('%Y-%m-%d %H:%M:%S', self.timestamp), self.usd, self.btc, self.account, fee_str)
 
     __repr__ = __str__
+
+    @classmethod
+    def csv_cols(cls):
+        return ('time', 'type', 'usd', 'btc', 'price', 'fee_usd', 'fee_btc', 'account', 'id', 'info')
+    @classmethod
+    def csv_header(cls, sep=','):
+        return sep.join(cls.csv_cols())
+    def csv(self, sep=','):
+        cols = []
+        for col_name in self.csv_cols():
+            if col_name == 'time':
+                value = time.strftime('%Y-%m-%d %H:%M:%S', self.timestamp)
+            else:
+                value = str(getattr(self, col_name))
+            cols.append(value)
+        return sep.join(cols).replace('\n', ' ')
 
 class Lot:
     def __init__(self, timestamp, btc, usd, transaction):
@@ -394,7 +414,7 @@ def fetch_prices(force_download=False):
             break
         print url
         format = None
-        for line in open_cached(url):
+        for line in open_cached(url, force_download=force_download):
             line = line.strip()
             if not line:
                 continue
@@ -409,7 +429,10 @@ def fetch_prices(force_download=False):
             cols = line.strip().split(',')
             if format == 'bitcoinaverage':
                 date = cols[0].split()[0]
-                price = (decimal.Decimal(cols[1]) + decimal.Decimal(cols[2])) / 2
+                if cols[1] and cols[2]:
+                    price = (decimal.Decimal(cols[1]) + decimal.Decimal(cols[2])) / 2
+                else:
+                    price = cols[3]  # avg published for earlier dates
             else:
                 date = '-'.join(reversed(cols[0].split()[0].split('/')))
                 price = cols[1]
@@ -516,6 +539,16 @@ def main(args):
         by_date[key] = key[0].merge_some(value)
     all = [t for merged in by_date.values() for t in merged]
     all.sort()
+
+    if parsed_args.flat_transactions_file:
+        handle = open(parsed_args.flat_transactions_file, 'w')
+        handle.write(Transaction.csv_header())
+        handle.write('\n')
+        for t in all:
+            handle.write(t.csv())
+            handle.write('\n')
+        handle.close()
+
 
     deposits = defaultdict(list)
     for t in all:
