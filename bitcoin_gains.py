@@ -339,17 +339,16 @@ class DbDumpParser(TransactionParser):
                     total_in = sum(tx['value'] for tx in in_tx)
                     total_out = sum(tx['value'] for tx in out_tx)
                     fee = total_in - total_out
-                    print "fee", fee
                     for ix, tx in enumerate(out_tx):
                         if tx['Own'] == 'False':
-                            yield Transaction(timestamp, 'withdraw', -tx['value'], 0, id="%s:%s" % (tx_id, id), fee_btc=fee, info=info + ' ' + tx['pubkey'], account='wallet.dat')
+                            yield Transaction(timestamp, 'withdraw', -tx['value'], 0, id="%s:%s" % (tx_id, ix), fee_btc=fee, info=info + ' ' + tx['pubkey'], account='wallet.dat')
                             fee = zero # only count the fee once
                     if fee:
                         yield Transaction(timestamp, 'fee', -fee, 0, id="%s:fee" % tx_id, info=info + ' fee', account='wallet.dat')
                 else:
                     for ix, tx in enumerate(out_tx):
                         if tx['Own'] == 'True':
-                            yield Transaction(timestamp, 'deposit', tx['value'], 0, id="%s:%s" % (tx_id, id), info=info + ' ' + tx['pubkey'], account='wallet.dat')
+                            yield Transaction(timestamp, 'deposit', tx['value'], 0, id="%s:%s" % (tx_id, ix), info=info + ' ' + tx['pubkey'], account='wallet.dat')
 
         assert not partial
 
@@ -393,7 +392,11 @@ class Transaction():
             fee_str = ", fee=%s USD" % self.fee_usd
         else:
             fee_str = ""
-        return "%s(%s, %s, %s, %s%s)" % (self.type, time.strftime('%Y-%m-%d %H:%M:%S', self.timestamp), self.usd, self.btc, self.account, fee_str)
+        if self.type == 'transfer':
+            dest_str = ', dest=%s' % self.dest_account
+        else:
+            dest_str = ""
+        return "%s(%s, %s, %s, %s%s%s)" % (self.type, time.strftime('%Y-%m-%d %H:%M:%S', self.timestamp), self.usd, self.btc, self.account, fee_str, dest_str)
 
     __repr__ = __str__
 
@@ -657,7 +660,8 @@ def main(args):
                 if matches:
                     print "no match", t, matches
 
-    pprint.pprint([(key, value) for key, value in deposits.items() if value])
+    pprint.pprint(sorted([(key, value) for key, value in deposits.items() if value],
+                         key=lambda kv: kv[1][0].timestamp))
     for t in all:
         if t.type not in ('trade', 'transfer'):
             print t
@@ -778,6 +782,7 @@ def main(args):
             to_sell = Lot(timestamp, -btc, usd, t)
             gain = 0
             long_term_gain = 0
+            lost_in_transfer = t.fee_btc
             while to_sell:
                 if not lots[t.account]:
                     # The default account can go negative, treat as a short
@@ -794,8 +799,12 @@ def main(args):
                     lots[t.account].push(remaining)
                 sell, to_sell = to_sell.split(buy.btc)
                 if t.type == 'transfer':
-                    push_lot(t.dest_account, buy)
-                    account_btc[t.dest_account] += buy.btc
+                    if lost_in_transfer:
+                        lost, buy = buy.split(lost_in_transfer)
+                        lost_in_transfer -= list.btc
+                    if buy:
+                        push_lot(t.dest_account, buy)
+                        account_btc[t.dest_account] += buy.btc
                 else:
                     gain += sell.usd - buy.usd
                     # TODO: split into long, short term.
