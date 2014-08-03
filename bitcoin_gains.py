@@ -141,6 +141,20 @@ class BitstampParser(CsvParser):
         else:
             raise ValueError, type
 
+class ElectrumParser(CsvParser):
+    expected_header = 'transaction_hash,label,confirmations,value,fee,balance,timestamp'
+
+    def parse_row(self, row):
+        transaction_hash,label,confirmations,value,fee,balance,timestamp = row
+        timestamp = time.strptime(timestamp, '%Y-%m-%d %H:%M')
+        if label[0] == '<' and label[-1] != '>':
+            label = label[1:]
+        common = dict(usd=None, fee_btc=fee[1:], info=label, id=transaction_hash)
+        if value[0] == '+':
+            return Transaction(timestamp, 'deposit', value[1:], **common)
+        else:
+            return Transaction(timestamp, 'withdraw', value, **common)
+
 class CoinbaseParser(CsvParser):
     expected_header = r'(User,.*,[0-9a-f]+)|(^Transactions$)'
     started = False
@@ -513,7 +527,7 @@ def save_external(external):
 
 def main(args):
 
-    parsers = [BitstampParser(), MtGoxParser(), BitcoindParser(), CoinbaseParser()]
+    parsers = [BitstampParser(), MtGoxParser(), BitcoindParser(), CoinbaseParser(), ElectrumParser()]
     all = []
     for file in args.histories:
         for parser in parsers:
