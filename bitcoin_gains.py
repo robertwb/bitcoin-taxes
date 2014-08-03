@@ -149,11 +149,15 @@ class ElectrumParser(CsvParser):
         timestamp = time.strptime(timestamp, '%Y-%m-%d %H:%M')
         if label[0] == '<' and label[-1] != '>':
             label = label[1:]
-        common = dict(usd=None, fee_btc=fee[1:], info=label, id=transaction_hash)
+        common = dict(usd=None, info=label, id=transaction_hash)
         if value[0] == '+':
             return Transaction(timestamp, 'deposit', value[1:], **common)
         else:
-            return Transaction(timestamp, 'withdraw', value, **common)
+            true_value = decimal.Decimal(value) - decimal.Decimal(fee)
+            if true_value == 0:
+                return Transaction(timestamp, 'fee', fee, **common)
+            else:
+                return Transaction(timestamp, 'withdraw', true_value, fee_btc=fee[1:], **common)
 
 class CoinbaseParser(CsvParser):
     expected_header = r'(User,.*,[0-9a-f]+)|(^Transactions$)'
@@ -289,7 +293,71 @@ class MtGoxParser(CsvParser):
                         break
                 raise ValueError, "Missing transactions in mtgox %s history (%s to %s)." % (usd_or_btc[is_btc], gap_start, gap_end-1)
 
+class DbDumpParser(TransactionParser):
+    # python bitcointools/dbdump.py --wallet-tx
+    # NOTE: by default dbdump.py only prints 5 digits, fix to print the last satoshi
+    # TODO(robertwb): Figure out how to extract the individual accounts.
+    def can_parse(self, filename):
+        return filename.endswith('.walletdump')
+    def parse_file(self, filename):
+        def parse_pseudo_dict(line):
+            d = {}
+            for item in line.replace(': ', ':').split():
+                if ':' in item:
+                    key, value = item.split(':', 1)
+                    if key == 'value':
+                        value = decimal.Decimal(value)
+                    d[key] = value
+            return d
 
+        partial = False
+        for line in open(filename):
+            line = line.strip()
+            if line.startswith('==WalletTransaction=='):
+                assert not partial
+                tx_id = line.split('=')[-1].strip()
+                partial = True
+                in_tx = []
+                out_tx = []
+                from_me = None
+            elif line.startswith('TxIn:'):
+                d = parse_pseudo_dict(line[5:])
+                in_tx.append(d)
+            elif line.startswith('TxOut:'):
+                d = parse_pseudo_dict(line[6:])
+                out_tx.append(d)
+            elif line.startswith('mapValue:'):
+                map_value = parse_pseudo_dict(line[10:-1].replace("'", "").replace(',', ' '))
+            elif 'fromMe' in line:
+#                from_me = 'fromMe:True' in line
+                from_me = 'pubkey' not in in_tx[0]
+                partial = False
+                info = ' '.join(s for s in [map_value.get('to'), map_value.get('comment')] if s)
+                timestamp = time.localtime(int(map_value['timesmart']))
+
+                if from_me:
+                    total_in = sum(tx['value'] for tx in in_tx)
+                    total_out = sum(tx['value'] for tx in out_tx)
+                    fee = total_in - total_out
+                    print "fee", fee
+                    for ix, tx in enumerate(out_tx):
+                        if tx['Own'] == 'False':
+                            yield Transaction(timestamp, 'withdraw', -tx['value'], 0, id="%s:%s" % (tx_id, id), fee_btc=fee, info=info + ' ' + tx['pubkey'], account='wallet.dat')
+                            fee = zero # only count the fee once
+                    if fee:
+                        yield Transaction(timestamp, 'fee', -fee, 0, id="%s:fee" % tx_id, info=info + ' fee', account='wallet.dat')
+                else:
+                    for ix, tx in enumerate(out_tx):
+                        if tx['Own'] == 'True':
+                            yield Transaction(timestamp, 'deposit', tx['value'], 0, id="%s:%s" % (tx_id, id), info=info + ' ' + tx['pubkey'], account='wallet.dat')
+
+        assert not partial
+
+    def merge_some(self, transactions):
+        return transactions
+
+
+zero = decimal.Decimal('0', 8)
 tenth = decimal.Decimal('0.1')
 def roundd(x, digits):
     return x.quantize(tenth**digits)
@@ -527,7 +595,7 @@ def save_external(external):
 
 def main(args):
 
-    parsers = [BitstampParser(), MtGoxParser(), BitcoindParser(), CoinbaseParser(), ElectrumParser()]
+    parsers = [BitstampParser(), MtGoxParser(), BitcoindParser(), CoinbaseParser(), ElectrumParser(), DbDumpParser()]
     all = []
     for file in args.histories:
         for parser in parsers:
@@ -671,7 +739,7 @@ def main(args):
                             income -= usd
                 else:
                     if t.type == 'fee':
-                        type = fee
+                        type = 'fee'
                         usd = approx_usd
                     else:
                         type = option_input("Is this a Sale, Purchase, Expense, or Transfer: ", ['sale', 'purchase', 'transfer', 'expense', 'abort', 'quit'], default='purchase')
@@ -697,6 +765,8 @@ def main(args):
 
 
         print t
+        if btc < 0:
+            btc -= t.fee_btc
         account_btc[t.account] += btc
         print "btc", btc, "usd", usd
         if btc == 0:
@@ -713,7 +783,7 @@ def main(args):
                     # The default account can go negative, treat as a short
                     # to be covered when btc is transfered back in.
                     # TODO(robertwb): Delay the gain until the short is covered.
-                    assert t.account == 'bitcoind'
+                    assert t.account == 'bitcoind', t
                     # Treat short as zero cost basis, loss will occur when count is refilled.
                     buy = Lot(t.timestamp, to_sell.btc, 0, t)
                 else:
