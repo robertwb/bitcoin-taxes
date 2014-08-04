@@ -77,9 +77,9 @@ class TransactionParser:
         return self.__class__.__name__.replace('Parser', '')
     def check_complete(self):
         pass
-    def unique(self):
+    def unique(self, timestamp):
         self.counter += 1
-        return "%s:%s" % (self.default_account(), self.counter)
+        return "%s:%s:%s" % (self.default_account(), timestamp, self.counter)
 
 class BitcoindParser(TransactionParser):
     def can_parse(self, filename):
@@ -107,7 +107,29 @@ class BitcoindParser(TransactionParser):
         # don't double-count the fee
         for t in transactions[1:]:
             t.fee_btc = 0
+        return transactionsclass
+
+class BitcoinInfoParser(TransactionParser):
+    # https://blockchain.info/address/ADDRESS?format=json
+    def can_parse(self, filename):
+        # TODO: This is way to loose...
+        head = open(filename).read(200)
+        return head[0] == '{' and '"n_tx":' in head and '"address":' in head
+    def parse_file(self, filename):
+        all = json.load(open(filename))
+        address = all['address']
+        for txn in all['txs']:
+            timestamp = time.localtime(txn['time'])
+            for ix, input in enumerate(txn['inputs']):
+                if input['prev_out']['addr'] == address:
+                    # TODO: fee
+                    yield Transaction(timestamp, 'withdraw', -decimal.Decimal(input['prev_out']['value']) / satoshi_to_btc, 0, id="%s-%s:%s" % (address, txn['hash'], ix), account=address)
+            for ix, output in enumerate(txn['out']):
+                if output['addr'] == address:
+                    yield Transaction(timestamp, 'deposit', decimal.Decimal(output['value']) / satoshi_to_btc, 0, id="%s-%s:%s" % (address, txn['hash'], ix), account=address)
+    def merge_some(self, transactions):
         return transactions
+
 
 class CsvParser(TransactionParser):
     expected_header = None
@@ -140,6 +162,16 @@ class BitstampParser(CsvParser):
             return Transaction(timestamp, 'trade', btc, usd, price, fee)
         else:
             raise ValueError, type
+
+class TransactionParser(CsvParser):
+    expected_header = 'timestamp,account,type,btc,usd,fee_btc,fee_usd,info'
+
+    def parse_row(self, row):
+        if not row[0] or row[0][0] == '#':
+            return None
+        timestamp,account,type,btc,usd,fee_btc,fee_usd,info = row
+        timestamp = time.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+        return Transaction(timestamp, type, btc, usd, fee_btc=fee_btc, fee_usd=fee_usd, account=account, info=info)
 
 class ElectrumParser(CsvParser):
     expected_header = 'transaction_hash,label,confirmations,value,fee,balance,timestamp'
@@ -186,7 +218,7 @@ class CoinbaseParser(CsvParser):
                     raise ValueError, "Ambiguous or missing price: %s" % note
                 usd = prices[0][1:]
             type = 'trade'
-            if 'Paid for' in note:
+            if 'Paid for' in note or 'Bought' in note:
                 usd = '-' + usd
         else:
             usd = 0
@@ -358,6 +390,7 @@ class DbDumpParser(TransactionParser):
 
 zero = decimal.Decimal('0', 8)
 tenth = decimal.Decimal('0.1')
+satoshi_to_btc = decimal.Decimal('1e8')
 def roundd(x, digits):
     return x.quantize(tenth**digits)
 
@@ -368,7 +401,7 @@ def strip_or_none(o):
     return o.strip() if o else o
 
 class Transaction():
-    def __init__(self, timestamp, type, btc, usd, price=None, fee_usd=0, fee_btc=0, info=None, id=None, account=None):
+    def __init__(self, timestamp, type, btc, usd, price=None, fee_usd=0, fee_btc=0, info=None, id=None, account=None, parser=None):
         self.timestamp = timestamp
         self.type = type
         self.btc = decimal_or_none(btc)
@@ -381,6 +414,8 @@ class Transaction():
             self.price = self.usd / self.btc
         self.id = id
         self.account = account
+        if parser:
+            self.parser = parser
 
     def __cmp__(left, right):
         return cmp(left.timestamp, right.timestamp) or cmp(left.id, right.id)
@@ -598,7 +633,7 @@ def save_external(external):
 
 def main(args):
 
-    parsers = [BitstampParser(), MtGoxParser(), BitcoindParser(), CoinbaseParser(), ElectrumParser(), DbDumpParser()]
+    parsers = [BitstampParser(), MtGoxParser(), BitcoindParser(), CoinbaseParser(), ElectrumParser(), DbDumpParser(), BitcoinInfoParser(), TransactionParser()]
     all = []
     for file in args.histories:
         for parser in parsers:
@@ -607,7 +642,7 @@ def main(args):
                 for transaction in parser.parse_file(file):
                     transaction.parser = parser
                     if transaction.id is None:
-                        transaction.id = parser.unique()
+                        transaction.id = parser.unique(transaction.timestamp)
                     if transaction.account is None:
                         transaction.account = parser.default_account()
                     all.append(transaction)
@@ -841,6 +876,9 @@ def main(args):
     for account, account_lots in sorted(lots.items()):
         print
         print account, account_btc[account]
+        if account_lots.data:
+            cost_basis = sum(lot.usd for lot in account_lots.data)
+            print "cost basis:", round(cost_basis, 2), "fmv:", round(market_value * account_btc[account], 2)
         while account_lots:
             print account_lots.pop()
 
