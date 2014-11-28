@@ -77,6 +77,8 @@ class TransactionParser:
         return self.__class__.__name__.replace('Parser', '')
     def check_complete(self):
         pass
+    def reset(self):
+        pass
     def unique(self, timestamp):
         self.counter += 1
         return "%s:%s:%s" % (self.default_account(), timestamp, self.counter)
@@ -139,14 +141,18 @@ class CsvParser(TransactionParser):
         raise NotImplementedError
     def parse_file(self, filename):
         first = True
-        for row in csv.reader(open(filename)):
+        for ix, row in enumerate(csv.reader(open(filename))):
             if not row or first:
                 first = False
                 continue
             else:
-                transaction = self.parse_row(row)
-                if transaction is not None:
-                    yield transaction
+                try:
+                    transaction = self.parse_row(row)
+                    if transaction is not None:
+                        yield transaction
+                except Exception:
+                    print ix, row
+                    raise
 
 class BitstampParser(CsvParser):
     expected_header = 'Type,Datetime,BTC,USD,BTC Price,FEE'
@@ -194,6 +200,9 @@ class ElectrumParser(CsvParser):
 class CoinbaseParser(CsvParser):
     expected_header = r'(User,.*,[0-9a-f]+)|(^Transactions$)'
     started = False
+
+    def reset(self):
+        self.started = False
 
     def parse_row(self, row):
         if not self.started:
@@ -646,6 +655,7 @@ def main(args):
                     if transaction.account is None:
                         transaction.account = parser.default_account()
                     all.append(transaction)
+                parser.reset()
                 break
         else:
             raise RuntimeError, "No parser for " + file
@@ -684,7 +694,7 @@ def main(args):
                     matches.remove(candidate)
                     all.remove(t)
                     all.remove(candidate)
-                    transfer = Transaction(t.timestamp, 'transfer', t.btc, 0, fee_usd=t.fee_usd)
+                    transfer = Transaction(t.timestamp, 'transfer', t.btc, 0, fee_btc=t.fee_btc, fee_usd=t.fee_usd)
                     transfer.account = t.account
                     transfer.dest_account = candidate.account
                     all.append(transfer)
@@ -836,7 +846,7 @@ def main(args):
                 if t.type == 'transfer':
                     if lost_in_transfer:
                         lost, buy = buy.split(lost_in_transfer)
-                        lost_in_transfer -= list.btc
+                        lost_in_transfer -= lost.btc
                     if buy:
                         push_lot(t.dest_account, buy)
                         account_btc[t.dest_account] += buy.btc
