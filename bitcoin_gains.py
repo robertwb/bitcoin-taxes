@@ -327,7 +327,9 @@ class MtGoxParser(CsvParser):
         usd_or_btc = ['USD', 'BTC']
         for is_btc in (True, False):
             transactions = self.seen_transactions[is_btc]
-            if len(transactions) != max(transactions):
+            if len(transactions) == 0:
+                pass
+            elif len(transactions) != max(transactions):
                 for gap_start in range(1, len(transactions)):
                     if gap_start not in transactions:
                         break
