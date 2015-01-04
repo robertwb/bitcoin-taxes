@@ -58,6 +58,8 @@ parser.add_argument("--external_transactions_file", default="external_transactio
 
 parser.add_argument("--flat_transactions_file", default="all_transactions.csv")
 
+parser.add_argument("--nowash", default=False, action="store_true")
+
 class TransactionParser:
     counter = 0
     def can_parse(self, filename):
@@ -830,7 +832,8 @@ def main(args):
             continue
         elif btc > 0:
             buy = Lot(timestamp, btc, -usd, t)
-#            recent_sells = []
+            if args.nowash:
+                recent_sells = []
             while recent_sells and buy:
                 recent_sell, recent_sell_buy = recent_sells.pop(0)
                 if time.mktime(recent_sell.timestamp) < time.mktime(timestamp) - 30*24*60*60:
