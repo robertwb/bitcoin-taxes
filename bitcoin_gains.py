@@ -461,12 +461,13 @@ class Transaction():
         return sep.join(cols).replace('\n', ' ')
 
 class Lot:
-    def __init__(self, timestamp, btc, usd, transaction):
+    def __init__(self, timestamp, btc, usd, transaction, dissallowed_loss=0):
         self.timestamp = timestamp
         self.btc = btc
         self.usd = usd
         self.price = usd / btc
         self.transaction = transaction
+        self.dissallowed_loss = dissallowed_loss
 
     def split(self, btc):
         """
@@ -476,8 +477,9 @@ class Lot:
             return None, self
         elif btc < self.btc:
             usd = roundd(self.price * btc, 2)
-            return (Lot(self.timestamp, btc, usd, self.transaction),
-                    Lot(self.timestamp, self.btc - btc, self.usd - usd, self.transaction))
+            dissallowed_loss = roundd(self.dissallowed_loss * btc / self.btc, 2)
+            return (Lot(self.timestamp, btc, usd, self.transaction, dissallowed_loss),
+                    Lot(self.timestamp, self.btc - btc, self.usd - usd, self.transaction, self.dissallowed_loss - dissallowed_loss))
         else:
             return self, None
 
@@ -488,7 +490,8 @@ class Lot:
             return cmp(right.timestamp, left.timestamp) or cmp(left.transaction, right.transaction)
 
     def __str__(self):
-        return "Lot(%s, %s, %s)" % (time.strftime('%Y-%m-%d', self.timestamp), self.btc, self.price)
+        dissallowed_loss = ", dissallowed_loss=%s" % self.dissallowed_loss if self.dissallowed_loss else ""
+        return "Lot(%s, %s, %s%s)" % (time.strftime('%Y-%m-%d', self.timestamp), self.btc, self.price, dissallowed_loss)
 
     __repr__ = __str__
 
@@ -719,6 +722,9 @@ def main(args):
     long_term_gains = 0
     total_sell = 0
     total_cost_basis = 0
+    recent_sells = []
+    dissallowed_loss = 0
+    exit = False
 
     # TODO(robertwb): Make an Account class
     def push_lot(account, lot):
@@ -739,6 +745,8 @@ def main(args):
     transfered_out = []
     print
     for ix, t in enumerate(all):
+        if exit:
+            break
         print ix, t
         timestamp = t.timestamp
         if t.type == 'trade':
@@ -821,8 +829,31 @@ def main(args):
         if btc == 0:
             continue
         elif btc > 0:
-            gains += push_lot(t.account, Lot(timestamp, btc, -usd, t))
-            total_cost -= usd
+            buy = Lot(timestamp, btc, -usd, t)
+#            recent_sells = []
+            while recent_sells and buy:
+                recent_sell, recent_sell_buy = recent_sells.pop(0)
+                if time.mktime(recent_sell.timestamp) < time.mktime(timestamp) - 30*24*60*60:
+                    continue
+                if recent_sell_buy.usd < recent_sell.usd:
+                    continue
+                recent_sell, recent_sell_remainder = recent_sell.split(buy.btc)
+                recent_sell_buy, recent_sell_buy_remainder = recent_sell_buy.split(buy.btc)
+                if recent_sell_remainder:
+                    recent_sells.insert(0, (recent_sell_remainder, recent_sell_buy_remainder))
+                wash_buy, buy = buy.split(recent_sell.btc)
+                loss = recent_sell_buy.usd - recent_sell.usd
+                print "Wash sale", recent_sell, wash_buy
+                print "Originally bought at", recent_sell_buy, "loss", loss
+                gains += loss
+                dissallowed_loss += loss
+                wash_buy.dissallowed_loss = loss
+                wash_buy.usd += loss
+                gains += push_lot(t.account, wash_buy)
+                total_cost += wash_buy.usd - loss
+            if not recent_sells and buy:
+                gains += push_lot(t.account, buy)
+                total_cost += buy.usd
         else:
             to_sell = Lot(timestamp, -btc, usd, t)
             gain = 0
@@ -857,25 +888,30 @@ def main(args):
                     total_cost_basis += buy.usd
                     if is_long_term(buy, sell):
                         long_term_gain += sell.usd - buy.usd
-                    total_cost -= buy.usd
+                    total_cost -= buy.usd - buy.dissallowed_loss
                     if t.type == 'transfer_out':
                         transfered_out.append((t, buy))
+                    else:
+                        dissallowed_loss -= buy.dissallowed_loss
+                        recent_sells.append((sell, buy))
             gains += gain
             long_term_gains += long_term_gain
         market_price = fmv(t.timestamp)
         total_btc = sum(account_btc.values())
         print account_btc
+        print "dissallowed_loss", dissallowed_loss
         print "total_btc", total_btc, "total_cost", total_cost, "market_price", market_price
-        print "gains", gains, "long_term_gains", long_term_gains, "unrealized_gains", market_price * total_btc - total_cost, "total", gains + market_price * total_btc - total_cost
+        unrealized_gains = market_price * total_btc - total_cost - dissallowed_loss
+        print "gains", gains, "long_term_gains", long_term_gains, "unrealized_gains", unrealized_gains, "total", gains + unrealized_gains
         print
-        unrealized_gains = market_price * total_btc - total_cost
         by_month.record(t.timestamp, income=income, gains=gains, long_term_gains=long_term_gains, unrealized_gains=unrealized_gains, total_cost=total_cost, total=income+gains+unrealized_gains,
                         total_sell=total_sell, total_cost_basis=total_cost_basis)
     save_external(external)
 
     market_value = fmv(time.gmtime(time.time() - 24*60*60))
+    unrealized_gains = market_price * total_btc - total_cost - dissallowed_loss
     print "total_btc", total_btc, "total_cost", total_cost, "market_price", market_price
-    print "gains", gains, "unrealized_gains", market_price * total_btc - total_cost
+    print "gains", gains, "unrealized_gains", unrealized_gains
     print
 
     print "Income"
