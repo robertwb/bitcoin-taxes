@@ -111,7 +111,7 @@ class BitcoindParser(TransactionParser):
         # don't double-count the fee
         for t in transactions[1:]:
             t.fee_btc = 0
-        return transactionsclass
+        return transactions
 
 class BitcoinInfoParser(TransactionParser):
     # https://blockchain.info/address/ADDRESS?format=json
