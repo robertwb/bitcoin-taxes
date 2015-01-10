@@ -31,6 +31,11 @@ import time
 import urllib2
 import urlparse
 
+try:
+    import readline
+except ImportError:
+    pass
+
 parser = argparse.ArgumentParser(description='Compute capital gains/losses.')
 
 parser.add_argument('histories', metavar='FILE', nargs='+',
