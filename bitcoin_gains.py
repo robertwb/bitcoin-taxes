@@ -740,7 +740,6 @@ def main(args):
             return -to_sell.usd
         else:
             return 0
-
     external = load_external()
     lots = defaultdict(Heap)
     all.sort()
@@ -765,6 +764,9 @@ def main(args):
                 purchase_date = time.strptime(data['purchase_date'], '%Y-%m-%d %H:%M:%S')
                 if data['type'] == 'transfer_out':
                     t.type = 'transfer_out'
+                elif data['type'] in ('income', 'expense'):
+                    income_txn.append((time.strftime('%Y-%m-%d', t.timestamp), -usd))
+                    income -= usd
             else:
                 price = t.price or fmv(t.timestamp)
                 approx_usd = roundd(-price * btc, 2)
