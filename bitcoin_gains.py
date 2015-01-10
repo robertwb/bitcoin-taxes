@@ -60,6 +60,8 @@ parser.add_argument("--flat_transactions_file", default="all_transactions.csv")
 
 parser.add_argument("--nowash", default=False, action="store_true")
 
+parser.add_argument("--buy_in_sell_month", default=False, action="store_true")
+
 class TransactionParser:
     counter = 0
     def can_parse(self, filename):
@@ -724,6 +726,7 @@ def main(args):
     income_txn = []
     gains = 0
     long_term_gains = 0
+    total_buy = 0
     total_sell = 0
     total_cost_basis = 0
     recent_sells = []
@@ -838,6 +841,7 @@ def main(args):
             continue
         elif btc > 0:
             buy = Lot(timestamp, btc, -usd, t)
+            total_buy -= usd
             if args.nowash:
                 recent_sells = []
             while recent_sells and buy:
@@ -914,7 +918,7 @@ def main(args):
         print "gains", gains, "long_term_gains", long_term_gains, "unrealized_gains", unrealized_gains, "total", gains + unrealized_gains
         print
         by_month.record(t.timestamp, income=income, gains=gains, long_term_gains=long_term_gains, unrealized_gains=unrealized_gains, total_cost=total_cost, total=income+gains+unrealized_gains,
-                        total_sell=total_sell, total_cost_basis=total_cost_basis)
+                        total_buy=total_buy, total_sell=total_sell, total_cost_basis=total_cost_basis)
     save_external(external)
 
     market_value = fmv(time.gmtime(time.time() - 24*60*60))
@@ -957,8 +961,11 @@ def main(args):
     print
 #    format = "{date:8} {income:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
 #    print format.replace('.2f', '').format(date='date', income='income', gains='realized gains', long_term_gains='long term', unrealized_gains='unrealized', total='total  ')
-    format = "{date:8} {income:>12.2f} {total_cost_basis:>12.2f} {total_sell:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
-    print format.replace('.2f', '').format(date='date', income='income', gains='realized gains', long_term_gains='long term', unrealized_gains='unrealized', total='total  ', total_sell='sell', total_cost_basis='buy')
+    if args.buy_in_sell_month:
+        format = "{date:8} {income:>12.2f} {total_cost_basis:>12.2f} {total_sell:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
+    else:
+        format = "{date:8} {income:>12.2f} {total_buy:>12.2f} {total_sell:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
+    print format.replace('.2f', '').format(date='date', income='income', gains='realized gains', long_term_gains='long term', unrealized_gains='unrealized', total='total  ', total_sell='sell', total_cost_basis='buy', total_buy='buy')
     by_month.dump(format)
     print
     print "Annual"
