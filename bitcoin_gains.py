@@ -921,7 +921,7 @@ def main(args):
                         total_buy=total_buy, total_sell=total_sell, total_cost_basis=total_cost_basis)
     save_external(external)
 
-    market_value = fmv(time.gmtime(time.time() - 24*60*60))
+    market_price = fmv(time.gmtime(time.time() - 24*60*60))
     unrealized_gains = market_price * total_btc - total_cost - dissallowed_loss
     print "total_btc", total_btc, "total_cost", total_cost, "market_price", market_price
     print "gains", gains, "unrealized_gains", unrealized_gains
@@ -937,7 +937,7 @@ def main(args):
         print account, account_btc[account]
         if account_lots.data:
             cost_basis = sum(lot.usd for lot in account_lots.data)
-            print "cost basis:", round(cost_basis, 2), "fmv:", round(market_value * account_btc[account], 2)
+            print "cost basis:", round(cost_basis, 2), "fmv:", round(market_price * account_btc[account], 2)
         while account_lots:
             print account_lots.pop()
 
@@ -959,6 +959,13 @@ def main(args):
             print "   ", lot
     print
     print
+
+    market_price = fmv(time.gmtime(time.time() - 24*60*60))
+    unrealized_gains = market_price * total_btc - total_cost - dissallowed_loss
+    print "total_btc", total_btc, "total_cost", total_cost, "market_price", market_price
+    print "gains", gains, "unrealized_gains", unrealized_gains
+    print
+
 #    format = "{date:8} {income:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
 #    print format.replace('.2f', '').format(date='date', income='income', gains='realized gains', long_term_gains='long term', unrealized_gains='unrealized', total='total  ')
     if args.buy_in_sell_month:
