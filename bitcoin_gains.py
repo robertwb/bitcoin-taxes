@@ -762,11 +762,13 @@ def main(args):
                 data = external[t.id]
                 usd, price = decimal.Decimal(data['usd']), decimal.Decimal(data['price'])
                 purchase_date = time.strptime(data['purchase_date'], '%Y-%m-%d %H:%M:%S')
-                if data['type'] == 'transfer_out':
+                if data['type'] in ('transfer_out'):
                     t.type = 'transfer_out'
                 elif data['type'] in ('income', 'expense'):
                     income_txn.append((time.strftime('%Y-%m-%d', t.timestamp), -usd))
                     income -= usd
+                elif data['type'] in ('buy', 'sale', 'purchase'):
+                    t.type = 'trade'
             else:
                 price = t.price or fmv(t.timestamp)
                 approx_usd = roundd(-price * btc, 2)
