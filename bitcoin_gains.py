@@ -108,6 +108,8 @@ class BitcoindParser(TransactionParser):
                 account = 'bitcoind'
             if item['category'] == 'receive':
                 yield Transaction(timestamp, 'deposit', item['amount'], 0, 0, id=item['txid'], info=info, account=account)
+            if item['category'] == 'generate':
+                yield Transaction(timestamp, 'deposit', item['amount'], 0, 0, id=item['txid'], info=info, account=account)
             elif item['category'] == 'send':
                 yield Transaction(timestamp, 'withdraw', item['amount'], 0, 0, fee_btc=item.get('fee', 0), id=item['txid'], info=info, account=account)
             elif item['category'] == 'move' and item['amount'] < 0 and not parsed_args.consolidate_bitcoind:
