@@ -165,10 +165,10 @@ class CsvParser(TransactionParser):
                     raise
 
 class BitstampParser(CsvParser):
-    expected_header = 'Type,Datetime,BTC,USD,BTC Price,FEE'
+    expected_header = 'Type,Datetime,BTC,USD,BTC Price,FEE,Sub Type'
 
     def parse_row(self, row):
-        type, timestamp, btc, usd, price, fee = row
+        type, timestamp, btc, usd, price, fee, _ = row
         timestamp = time.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
         if type == '0':
             return Transaction(timestamp, 'deposit', btc, 0, 0)
@@ -217,11 +217,13 @@ class CoinbaseParser(CsvParser):
     def parse_row(self, row):
         if not self.started:
             raw_row = ",".join(row)
-            if raw_row.startswith('Timestamp,Balance,BTC Amount') or raw_row.startswith('User,'):
+            if (raw_row.startswith('Timestamp,Balance,')
+                or raw_row.startswith('User,')
+                or raw_row.startswith('Account,')):
                 # Coinbase has multiple header lines.
                 return None
             self.started = True
-        timestamp, _, btc, to, note, _, total, total_currency = row[:8]
+        timestamp, _, btc, _, to, note, _, total, total_currency = row[:9]
         date, hour, zone = timestamp.split()
         timestamp = time.strptime(date + " " + hour, '%Y-%m-%d %H:%M:%S')
         offset = int(zone[:-2]) * 3600 + int(zone[-2:]) * 60
