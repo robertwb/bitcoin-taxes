@@ -149,6 +149,7 @@ class CsvParser(TransactionParser):
     def parse_row(self, row):
         raise NotImplementedError
     def parse_file(self, filename):
+        self.filename = filename
         first = True
         for ix, row in enumerate(csv.reader(open(filename))):
             if not row or first:
@@ -242,7 +243,11 @@ class CoinbaseParser(CsvParser):
             usd = 0
             type = 'deposit' if float(btc) > 0 else 'withdraw'
         info = " ".join([note, to])
-        return Transaction(timestamp, type, btc, usd, info=info)
+        if True:
+            account = self.filename
+        else:
+            account = None
+        return Transaction(timestamp, type, btc, usd, info=info, account=account)
 
 
 class MtGoxParser(CsvParser):
