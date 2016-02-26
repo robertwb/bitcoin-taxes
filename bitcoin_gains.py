@@ -192,12 +192,17 @@ class TransactionParser(CsvParser):
         return Transaction(timestamp, type, btc, usd, fee_btc=fee_btc, fee_usd=fee_usd, account=account, info=info)
 
 class ElectrumParser(CsvParser):
-    expected_header = 'transaction_hash,label,confirmations,value,fee,balance,timestamp'
+    # expected_header = 'transaction_hash,label,confirmations,value,fee,balance,timestamp'
+    expected_header = 'transaction_hash,label,confirmations,value,timestamp'  # 2.5.4
 
     def parse_row(self, row):
-        transaction_hash,label,confirmations,value,fee,balance,timestamp = row
+#        transaction_hash,label,confirmations,value,fee,balance,timestamp = row
+        transaction_hash,label,confirmations,value,timestamp = row
+        fee = '00'  # TODO: Why isn't this exported anymore?
         timestamp = time.strptime(timestamp, '%Y-%m-%d %H:%M')
-        if label[0] == '<' and label[-1] != '>':
+        if not label:
+            label = 'unknown'
+        elif label[0] == '<' and label[-1] != '>':
             label = label[1:]
         common = dict(usd=None, info=label, id=transaction_hash)
         if value[0] == '+':
