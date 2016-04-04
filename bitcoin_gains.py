@@ -67,6 +67,8 @@ parser.add_argument("--nowash", default=False, action="store_true")
 
 parser.add_argument("--buy_in_sell_month", default=False, action="store_true")
 
+parser.add_argument("--end_date", metavar="YYYY-MM-DD")
+
 class TransactionParser:
     counter = 0
     def can_parse(self, filename):
@@ -670,6 +672,11 @@ def save_external(external):
 
 def main(args):
 
+    if args.end_date:
+        max_timestamp = time.strptime(args.end_date + " 23:59:59", "%Y-%m-%d %H:%M:%S")
+    else:
+        max_timestamp = float('inf'),
+
     parsers = [BitstampParser(), MtGoxParser(), BitcoindParser(), CoinbaseParser(), ElectrumParser(), DbDumpParser(), BitcoinInfoParser(), TransactionParser()]
     all = []
     for file in args.histories:
@@ -774,6 +781,8 @@ def main(args):
             break
         print ix, t
         timestamp = t.timestamp
+        if timestamp > max_timestamp:
+            break
         if t.type == 'trade':
             usd, btc = t.usd - t.fee_usd, t.btc
         elif t.type == 'transfer':
