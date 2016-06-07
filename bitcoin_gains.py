@@ -200,8 +200,10 @@ class ElectrumParser(CsvParser):
     def parse_row(self, row):
 #        transaction_hash,label,confirmations,value,fee,balance,timestamp = row
         transaction_hash,label,confirmations,value,timestamp = row
-        fee = '00'  # TODO: Why isn't this exported anymore?
+        # TODO: Why isn't this exported anymore?
+        fee = tx_fee(transaction_hash)
         timestamp = time.strptime(timestamp, '%Y-%m-%d %H:%M')
+        timestamp = time.localtime(time.mktime(timestamp) + 7*60*60)
         if not label:
             label = 'unknown'
         elif label[0] == '<' and label[-1] != '>':
@@ -210,11 +212,12 @@ class ElectrumParser(CsvParser):
         if value[0] == '+':
             return Transaction(timestamp, 'deposit', value[1:], **common)
         else:
-            true_value = decimal.Decimal(value) - decimal.Decimal(fee)
+            assert value[0] == '-'
+            true_value = decimal.Decimal(value) + decimal.Decimal(fee)
             if true_value == 0:
                 return Transaction(timestamp, 'fee', fee, **common)
             else:
-                return Transaction(timestamp, 'withdraw', true_value, fee_btc=fee[1:], **common)
+                return Transaction(timestamp, 'withdraw', true_value, fee_btc=fee, **common)
 
 class CoinbaseParser(CsvParser):
     expected_header = r'(User,.*,[0-9a-f]+)|(^Transactions$)'
@@ -599,6 +602,21 @@ def fetch_prices(force_download=False):
                 prices[date] = decimal.Decimal(price)
     print "Done"
 
+tx_fees = {}
+def tx_fee(tx_hash):
+    global tx_fees
+    tx_fee_file = 'tx_fees.json'
+    if not tx_fees and os.path.exists(tx_fee_file):
+        tx_fees = json.load(open(tx_fee_file))
+    if tx_hash in tx_fees:
+        return decimal.Decimal(tx_fees[tx_hash])
+    else:
+        print "Downloading fee for tx", tx_hash
+        fee = decimal.Decimal(urllib2.urlopen("https://blockchain.info/q/txfee/" + tx_hash).read().strip()) * decimal.Decimal('1e-8')
+        tx_fees[tx_hash] = str(fee)
+        json.dump(tx_fees, open(tx_fee_file, 'w'))
+        return fee
+
 def is_long_term(buy, sell):
     # Years vary in length, making this a bit messy...
     def parts(t):
@@ -635,16 +653,24 @@ def re_input(prompt, regex, flags, default):
         r = raw_input(prompt)
         if r == '':
             return default
+        elif r == '?':
+            return default + '?'
     return r
 
 def option_input(prompt, options, default=None):
-    regex = '|'.join("%s(%s)?" % (option[0], option[1:]) for option in options)
+    regex = '|'.join(r"%s(%s)?\??" % (option[0], option[1:]) for option in options)
     if default != None:
         prompt += '[%s] ' % default.upper()[0]
+        regex += r'|\?'
     res = re_input(prompt, regex, re.I, default=default)
+    if res.endswith('?'):
+        record = False
+        res = res.strip('?')
+    else:
+        record = not parsed_args.non_interactive
     for option in options:
         if option.upper().startswith(res.upper()):
-            return option
+            return option, record
 
 def value_input(prompt, btc, price):
     usd = roundd(btc * price, 2)
@@ -752,6 +778,7 @@ def main(args):
     income_txn = []
     gains = 0
     long_term_gains = 0
+    long_term_gifts = 0
     total_buy = 0
     total_sell = 0
     total_cost_basis = 0
@@ -798,6 +825,8 @@ def main(args):
                 elif data['type'] in ('income', 'expense'):
                     income_txn.append((time.strftime('%Y-%m-%d', t.timestamp), -usd))
                     income -= usd
+                elif data['type'] == 'gift':
+                    t.type = 'gift'
                 elif data['type'] in ('buy', 'sale', 'purchase'):
                     t.type = 'trade'
             else:
@@ -811,10 +840,11 @@ def main(args):
                     abs(approx_usd),
                     price)
                 print t.info
+                save_choice = not args.non_interactive
                 if btc == 0:
                     continue
                 elif btc > 0:
-                    type = option_input("Is this Income, Transfer or a Buy: ", ['income', 'transfer', 'buy', 'abort', 'quit'], default='income')
+                    type, save_choice = option_input("Is this Income, Transfer or a Buy: ", ['income', 'transfer', 'buy', 'abort', 'quit'], default='income')
                     if type in ('quit', 'abort'):
                         if type == 'quit':
                             save_external(external)
@@ -838,7 +868,7 @@ def main(args):
                         type = 'fee'
                         usd = approx_usd
                     else:
-                        type = option_input("Is this a Sale, Purchase, Expense, or Transfer: ", ['sale', 'purchase', 'transfer', 'expense', 'abort', 'quit'], default='purchase')
+                        type, save_choice = option_input("Is this a Sale, Purchase, Expense, Transfer, or (Charitable) Gift: ", ['sale', 'purchase', 'transfer', 'expense', 'gift', 'abort', 'quit'], default='purchase')
                         if type in ('quit', 'abort'):
                             if type == 'quit':
                                 save_external(external)
@@ -852,7 +882,7 @@ def main(args):
                             if type == 'expense':
                                 income_txn.append((time.strftime('%Y-%m-%d', t.timestamp), -usd))
                                 income -= usd
-                if type != 'fee' and not args.non_interactive:
+                if type != 'fee' and save_choice:
                     note = raw_input('Note: ')
                     external[t.id] = { 'usd': str(usd), 'btc': str(btc), 'price': str(price),
                                        'type': type, 'note': note, 'info': t.info, 'account': t.account,
@@ -899,6 +929,7 @@ def main(args):
             to_sell = Lot(timestamp, -btc, usd, t)
             gain = 0
             long_term_gain = 0
+            long_term_gift = 0
             lost_in_transfer = t.fee_btc
             while to_sell:
                 if not lots[t.account]:
@@ -932,11 +963,14 @@ def main(args):
                     total_cost -= buy.usd - buy.dissallowed_loss
                     if t.type == 'transfer_out':
                         transfered_out.append((t, buy))
+                    elif t.type == 'gift' and is_long_term(buy, sell):
+                        long_term_gift += sell.usd - buy.usd
                     else:
                         dissallowed_loss -= buy.dissallowed_loss
                         recent_sells.append((sell, buy))
             gains += gain
             long_term_gains += long_term_gain
+            long_term_gifts += long_term_gift
         market_price = fmv(t.timestamp)
         total_btc = sum(account_btc.values())
         print account_btc
@@ -946,7 +980,7 @@ def main(args):
         print "gains", gains, "long_term_gains", long_term_gains, "unrealized_gains", unrealized_gains, "total", gains + unrealized_gains
         print
         by_month.record(t.timestamp, income=income, gains=gains, long_term_gains=long_term_gains, unrealized_gains=unrealized_gains, total_cost=total_cost, total=income+gains+unrealized_gains,
-                        total_buy=total_buy, total_sell=total_sell, total_cost_basis=total_cost_basis)
+                        total_buy=total_buy, total_sell=total_sell, total_cost_basis=total_cost_basis, long_term_gifts=long_term_gifts)
     save_external(external)
 
     market_price = fmv(time.gmtime(time.time() - 24*60*60))
@@ -1003,10 +1037,10 @@ def main(args):
 #    format = "{date:8} {income:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
 #    print format.replace('.2f', '').format(date='date', income='income', gains='realized gains', long_term_gains='long term', unrealized_gains='unrealized', total='total  ')
     if args.buy_in_sell_month:
-        format = "{date:8} {income:>12.2f} {total_cost_basis:>12.2f} {total_sell:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
+        format = "{date:8} {income:>12.2f} {total_cost_basis:>12.2f} {total_sell:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {long_term_gifts:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
     else:
-        format = "{date:8} {income:>12.2f} {total_buy:>12.2f} {total_sell:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
-    print format.replace('.2f', '').format(date='date', income='income', gains='realized gains', long_term_gains='long term', unrealized_gains='unrealized', total='total  ', total_sell='sell', total_cost_basis='buy', total_buy='buy')
+        format = "{date:8} {income:>12.2f} {total_buy:>12.2f} {total_sell:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {long_term_gifts:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
+    print format.replace('.2f', '').format(date='date', income='income', gains='realized gains', long_term_gains='long term', long_term_gifts='gift exempt', unrealized_gains='unrealized', total='total  ', total_sell='sell', total_cost_basis='buy', total_buy='buy')
     by_month.dump(format)
     print
     print "Annual"
