@@ -172,7 +172,7 @@ class BitstampParser(CsvParser):
     expected_header = 'Type,Datetime,BTC,USD,BTC Price,FEE,Sub Type'
 
     def parse_row(self, row):
-        type, timestamp, btc, usd, price, fee, _ = row
+        type, timestamp, btc, usd, price, fee, _, _ = row
         timestamp = time.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
         if type == '0':
             return Transaction(timestamp, 'deposit', btc, 0, 0)
@@ -524,8 +524,8 @@ class Lot:
 
 # Why is this not a class?
 class Heap:
-    def __init__(self):
-        self.data = []
+    def __init__(self, data=[]):
+        self.data = list(data)
     def push(self, item):
         heapq.heappush(self.data, item)
     def pop(self):
@@ -966,8 +966,14 @@ def main(args):
         if account_lots.data:
             cost_basis = sum(lot.usd for lot in account_lots.data)
             print "cost basis:", round(cost_basis, 2), "fmv:", round(market_price * account_btc[account], 2)
+        account_lots = Heap(account_lots.data)
         while account_lots:
             print account_lots.pop()
+
+    print
+    for account, account_lots in sorted(lots.items()):
+        cost_basis = sum(lot.usd for lot in account_lots.data)
+        print account, account_btc[account], "cost basis:", round(cost_basis, 2), "fmv:", round(market_price * account_btc[account], 2)
 
     if transfered_out:
         print
