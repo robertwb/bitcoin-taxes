@@ -586,6 +586,8 @@ def fetch_prices(force_download=False):
                     continue
                 elif re.match(r'\d\d/\d\d/\d\d\d\d \d\d:\d\d:\d\d,\d+\.\d*', line):
                     format = 'blockchain'
+                elif re.match(r'\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d,\d+\.\d*', line):
+                    format = 'blockchain'
                 else:
                     raise ValueError, "Unknown format: %s" % line
             cols = line.strip().split(',')
@@ -596,7 +598,10 @@ def fetch_prices(force_download=False):
                 else:
                     price = cols[3]  # avg published for earlier dates
             else:
-                date = '-'.join(reversed(cols[0].split()[0].split('/')))
+                if '-' in cols[0]:
+                    date = cols[0].split()[0]
+                else:
+                    date = '-'.join(reversed(cols[0].split()[0].split('/')))
                 price = cols[1]
             if date not in prices:
                 prices[date] = decimal.Decimal(price)
