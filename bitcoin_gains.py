@@ -160,6 +160,8 @@ class CsvParser(TransactionParser):
             if not row or first:
                 first = False
                 continue
+            elif row[0].startswith('#'):
+                continue
             else:
                 try:
                     transaction = self.parse_row(row)
