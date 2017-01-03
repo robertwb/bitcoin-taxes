@@ -514,7 +514,7 @@ class Transaction():
             self.parser = parser
 
     def __cmp__(left, right):
-        return cmp(left.timestamp, right.timestamp) or cmp(left.id, right.id)
+        return cmp(left.timestamp, right.timestamp) or -cmp(left.btc, right.btc) or cmp(left.id, right.id)
 
     def __str__(self):
         if self.fee_btc:
@@ -998,7 +998,7 @@ def main(args):
                     # The default account can go negative, treat as a short
                     # to be covered when btc is transfered back in.
                     # TODO(robertwb): Delay the gain until the short is covered.
-                    assert t.account == 'bitcoind', t
+                    assert t.account == 'bitcoind', (t, to_sell)
                     # Treat short as zero cost basis, loss will occur when count is refilled.
                     buy = Lot(t.timestamp, to_sell.btc, 0, t)
                 else:
