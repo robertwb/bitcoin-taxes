@@ -154,6 +154,7 @@ class CsvParser(TransactionParser):
         raise NotImplementedError
     def parse_file(self, filename):
         self.filename = filename
+        self.start()
         first = True
         for ix, row in enumerate(csv.reader(open(filename))):
             if not row or first:
@@ -167,6 +168,12 @@ class CsvParser(TransactionParser):
                 except Exception:
                     print ix, row
                     raise
+        for transaction in self.finish():
+            yield transaction
+    def start(self):
+        pass
+    def finish(self):
+        return ()
 
 class BitstampParser(CsvParser):
     expected_header = 'Type,Datetime,BTC,USD,BTC Price,FEE,Sub Type'
@@ -262,6 +269,58 @@ class CoinbaseParser(CsvParser):
         else:
             account = None
         return Transaction(timestamp, type, btc, usd, info=info, account=account)
+
+
+class KrakenParser(CsvParser):
+
+    def start(self):
+        self._trades = defaultdict(dict)
+
+    def can_parse(self, filename):
+        first_line = open(filename).readline().strip()
+        if first_line.endswith('"ledgers"'):
+            raise ValueError("Use ledger, not trade, export for Kraken.")
+        elif first_line == '"txid","refid","time","type","aclass","asset","amount","fee","balance"':
+            return True
+
+    def parse_row(self, row):
+        txid, refid, ktimestamp, ktype, _, asset, amount, fee, _ = row
+        timestamp = time.strptime(ktimestamp, '%Y-%m-%d %H:%M:%S')
+        if ktype == 'trade':
+            info = self._trades[refid]
+            assert asset not in info
+            info[asset] = row
+            if len(info) >= 3 and 'XXBT' in info:
+                btc = info['XXBT'][6]
+                if 'ZUSD' in info:
+                    usd = info['ZUSD'][6]
+                    type = 'trade'
+                else:
+                    usd = 0
+                    type = 'deposit' if float(btc) > 0 else 'withdraw'
+                del self._trades[refid]
+                pprint.pprint(info)
+                print Transaction(timestamp, type, btc, usd)
+                return Transaction(timestamp, type, btc, usd)
+            else:
+                return
+        elif asset != 'XXBT':
+            return None
+
+        if ktype == 'deposit':
+            print Transaction(timestamp, ktype, amount, 0)
+            return Transaction(timestamp, ktype, amount, 0)
+        else:
+            raise NotImplementedError(ktype + ': ' + ','.join(row))
+
+    def finish(self):
+        if self._trades:
+            unfinished = [(refid, info) for refid, info in self._trades
+                          if len(info) < (2 + 'KFEE' in info)]
+            if unfinished:
+                pprint.pprint(dict(unfinished))
+                raise ValueError('Unfinished trades.')
+        return ()
 
 
 class MtGoxParser(CsvParser):
@@ -708,7 +767,7 @@ def main(args):
     else:
         max_timestamp = float('inf'),
 
-    parsers = [BitstampParser(), MtGoxParser(), BitcoindParser(), CoinbaseParser(), ElectrumParser(), DbDumpParser(), BitcoinInfoParser(), TransactionParser()]
+    parsers = [BitstampParser(), MtGoxParser(), BitcoindParser(), CoinbaseParser(), ElectrumParser(), DbDumpParser(), BitcoinInfoParser(), TransactionParser(), KrakenParser()]
     all = []
     for file in args.histories:
         for parser in parsers:
