@@ -299,8 +299,6 @@ class KrakenParser(CsvParser):
                     usd = 0
                     type = 'deposit' if float(btc) > 0 else 'withdraw'
                 del self._trades[refid]
-                pprint.pprint(info)
-                print Transaction(timestamp, type, btc, usd)
                 return Transaction(timestamp, type, btc, usd)
             else:
                 return
