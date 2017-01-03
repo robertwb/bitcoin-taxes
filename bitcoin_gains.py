@@ -581,7 +581,7 @@ def fetch_prices(force_download=False):
             if not line:
                 continue
             if format is None:
-                if line == 'datetime,high,low,average,volume':
+                if line.lower().replace('volume btc', 'volume') == 'datetime,high,low,average,volume':
                     format = 'bitcoinaverage'
                     continue
                 elif re.match(r'\d\d/\d\d/\d\d\d\d \d\d:\d\d:\d\d,\d+\.\d*', line):
