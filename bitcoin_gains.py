@@ -69,6 +69,10 @@ parser.add_argument("--buy_in_sell_month", default=False, action="store_true")
 
 parser.add_argument("--end_date", metavar="YYYY-MM-DD")
 
+parser.add_argument("--list_purchases", default=False, action="store_true")
+
+parser.add_argument("--list_gifts", default=False, action="store_true")
+
 class TransactionParser:
     counter = 0
     def can_parse(self, filename):
@@ -1111,6 +1115,30 @@ def main(args):
     print "Income"
     for date, amount in income_txn:
         print "{date:8} {amount:>12.2f}".format(date=date, amount=amount)
+
+    if args.list_purchases:
+        print
+        print "Purchase"
+        for t in all:
+            if t.id in external:
+                data = dict(external[t.id])
+                if data['type'] == 'purchase':
+                    data['usd'] = decimal_or_none(data['usd'])
+                    data['btc'] = decimal_or_none(data['btc'])
+                    print "{purchase_date:8} {usd:>10.2f}  {btc:>12.8f}  {account:10}   {info} {note}".format(
+                        **data)
+
+    if args.list_gifts:
+        print
+        print "Gifts"
+        for t in all:
+            if t.id in external:
+                data = dict(external[t.id])
+                if data['type'] == 'gift':
+                    data['usd'] = decimal_or_none(data['usd'])
+                    data['btc'] = decimal_or_none(data['btc'])
+                    print "{purchase_date:8} {usd:>10.2f}  {btc:>12.8f}  {account:10}   {info} {note}".format(
+                        **data)
 
 
     for account, account_lots in sorted(lots.items()):
