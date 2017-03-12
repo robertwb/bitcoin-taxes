@@ -291,6 +291,8 @@ class CoinbaseParser(CsvParser):
         timestamp = time.strptime(date + " " + hour, '%Y-%m-%d %H:%M:%S')
         offset = int(zone[:-2]) * 3600 + int(zone[-2:]) * 60
         timestamp = time.localtime(time.mktime(timestamp) - offset)
+        if 'will arrive in your bank account' in note:
+          note = '$' + note
         if '$' in note:
             # It's a buy/sell
             if total:
