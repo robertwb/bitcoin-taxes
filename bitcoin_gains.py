@@ -85,7 +85,7 @@ class TransactionParser:
         # returns list[Transaction]
         return [self.merge(transactions)]
     def default_account(self):
-        return self.__class__.__name__.replace('Parser', '')
+        return self.__class__.__name__.replace('Parser', '').rstrip('0123456789')
     def check_complete(self):
         pass
     def reset(self):
@@ -191,6 +191,48 @@ class BitstampParser(CsvParser):
             return Transaction(timestamp, 'trade', btc, usd, price, fee)
         else:
             raise ValueError, type
+
+class BitstampParser2(CsvParser):
+    expected_header = 'Type,Datetime,Account,Amount,Value,Rate,Fee,Sub Type'
+
+    @staticmethod
+    def _trim(s, suffix):
+        if not s:
+            return None
+        else:
+            assert s.endswith(suffix), (s, suffix)
+            return s[:-len(suffix)]
+
+    _last_timestamp = None
+    def add_secs(self, timestamp):
+      # Add seconds to preserve order in file, as granularity is only minutes.
+      if timestamp == self._last_timestamp:
+        self._secs += 1
+        return time.localtime(time.mktime(timestamp) + self._secs)
+      else:
+        self._last_timestamp = timestamp
+        self._secs = 0
+        return timestamp
+
+    def parse_row(self, row):
+        type, timestamp, _, btc, usd, price, fee, buy_sell = row
+
+        timestamp = self.add_secs(time.strptime(timestamp, '%b. %d, %Y, %I:%M %p'))
+        btc = self._trim(btc, ' BTC')
+        usd = self._trim(usd, ' USD')
+        price = self._trim(price, ' USD')
+        fee = self._trim(fee, ' USD') or 0
+
+        if type == 'Deposit':
+            return Transaction(timestamp, 'deposit', btc, 0, 0)
+        elif type == 'Withdrawal':
+            return Transaction(timestamp, 'withdraw', '-' + btc, 0, 0)
+        else:
+            if buy_sell == 'Sell':
+              btc = '-' + btc
+            else:
+              usd = '-' + usd
+            return Transaction(timestamp, 'trade', btc, usd, price, fee)
 
 class TransactionParser(CsvParser):
     expected_header = 'timestamp,account,type,btc,usd,fee_btc,fee_usd,info'
@@ -767,7 +809,18 @@ def main(args):
     else:
         max_timestamp = float('inf'),
 
-    parsers = [BitstampParser(), MtGoxParser(), BitcoindParser(), CoinbaseParser(), ElectrumParser(), DbDumpParser(), BitcoinInfoParser(), TransactionParser(), KrakenParser()]
+    parsers = [
+      BitstampParser(),
+      BitstampParser2(),
+      MtGoxParser(),
+      BitcoindParser(),
+      CoinbaseParser(),
+      ElectrumParser(),
+      DbDumpParser(),
+      BitcoinInfoParser(),
+      TransactionParser(),
+      KrakenParser(),
+    ]
     all = []
     for file in args.histories:
         for parser in parsers:
