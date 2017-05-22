@@ -397,8 +397,9 @@ class KrakenParser(CsvParser):
             return None
 
         if ktype == 'deposit':
-            print Transaction(timestamp, ktype, amount, 0)
             return Transaction(timestamp, ktype, amount, 0)
+        elif ktype == 'withdrawal':
+            return Transaction(timestamp, 'withdraw', amount, 0, fee_btc=fee)
         else:
             raise NotImplementedError(ktype + ': ' + ','.join(row))
 
