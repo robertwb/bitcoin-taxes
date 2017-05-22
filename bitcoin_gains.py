@@ -321,6 +321,47 @@ class CoinbaseParser(CsvParser):
         return Transaction(timestamp, type, btc, usd, info=info, account=account)
 
 
+class GdaxParser(CsvParser):
+
+    def parse_time(self, stime):
+        return time.strptime(stime.replace('Z', '000'), '%Y-%m-%dT%H:%M:%S.%f')
+
+    def default_account(self):
+        return 'gdax'
+
+class GdaxFillsParser(GdaxParser):
+    expected_header = 'trade id,product,side,created at,size,size unit,price,fee,total,price/fee/total unit'
+
+    def parse_row(self, row):
+        trade, product, buy_sell, stime, btc, unit, price, fee_usd, total, pft_unit = row
+        if product != 'BTC-USD':
+            return None
+        assert unit == 'BTC' and pft_unit == 'USD'
+        timestamp = self.parse_time(stime)
+        usd = decimal.Decimal(total) + decimal.Decimal(fee_usd)
+        if buy_sell == 'BUY':
+          return Transaction(timestamp, 'trade', btc, usd, fee_usd=fee_usd)
+        elif buy_sell == 'SELL':
+          return Transaction(timestamp, 'trade', '-' + btc, usd, fee_usd=fee_usd)
+        else:
+            raise ValueError("Unknown transactiont type: %s" % buy_sell)
+
+
+class GdaxAccountParser(GdaxParser):
+    expected_header = 'type,time,amount,balance,amount/balance unit,transfer id,trade id,order id'
+
+    def parse_row(self, row):
+        type, stime, amount, _, unit, tid, _, _ = row
+        if unit != 'BTC':
+            raise ValueError("Only BTC accounts supported.")
+        timestamp = self.parse_time(stime)
+        if type == 'match':
+          return None  # handled in fills
+        elif type == 'deposit':
+          return Transaction(timestamp, 'deposit', amount, 0, id=tid)
+        else:
+            raise ValueError("Unknown transactiont type: %s" % type)
+
 class KrakenParser(CsvParser):
 
     def start(self):
@@ -821,6 +862,8 @@ def main(args):
       MtGoxParser(),
       BitcoindParser(),
       CoinbaseParser(),
+      GdaxAccountParser(),
+      GdaxFillsParser(),
       ElectrumParser(),
       DbDumpParser(),
       BitcoinInfoParser(),
