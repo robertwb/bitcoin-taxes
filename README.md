@@ -24,7 +24,9 @@ Transfers between known accounts are automatically detected.
 Use
 ---
 
-First, download all the transaction histories from all your exchanges.  Currently Bitstamp, Coinbase, and MtGox are supported, but more formats can be easily added.  Note that for MtGox both the BTC and USD files must be downloaded (with BTC or USD in the filename) as neither has the full history.  Transactions from your local wallets should also be exported via `bitcoind list transactions '*' 1000000 > local-accounts.json`.  Run the script as
+First, download all the transaction histories from all your exchanges.
+Currently transactions downloaded/exported from from BitcoinInfo, Bitstamp, Coinbase, Gdax, Kraken, MtGox, Bitcoind (core), and Electrum, are supported, but more formats can be easily added.
+Note that for MtGox both the BTC and USD files must be downloaded (with BTC or USD in the filename) as neither has the full history.  Transactions from your local wallets should also be exported via `bitcoind list transactions '*' 1000000 > local-accounts.json`.  Run the script as
 
     python bitcoin_gains.py transaction_downloads/*.csv local-accounts.json ...
 
