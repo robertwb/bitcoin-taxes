@@ -21,6 +21,7 @@ import argparse
 from collections import defaultdict
 import csv
 import decimal
+import hashlib
 import heapq
 import json
 import re
@@ -753,14 +754,26 @@ class Heap:
     def __len__(self):
         return len(self.data)
 
+
+def url_to_filename(url):
+    parts = urlparse.urlparse(url)
+    hash = hashlib.sha1(url).hexdigest()
+    raw = '-'.join([parts.hostname] + parts.path.split('/') + parts.query.split('&'))
+    return re.sub('[^a-zA-Z0-9_-]', '_', raw[:100]) + '-' + hash[:8]
+
 already_forced_download = set()
-def open_cached(url, force_download=False):
+def open_cached(url, force_download=False, cache_dir='download-cache'):
     global already_forced_download
     if '://' not in url:
         # It's a (possibly relative) file path.
         return open(url)
     parts = urlparse.urlparse(url)
-    basename = 'cached-' + parts.hostname + '-' + parts.path.split('/')[-1]
+    if not os.path.exists(cache_dir):
+        os.mkdir(cache_dir)
+    basename = os.path.join(cache_dir, url_to_filename(url))
+    old_basename = 'cached-' + parts.hostname + '-' + parts.path.split('/')[-1]
+    if os.path.exists(old_basename) and not os.path.exists(basename):
+        os.rename(old_basename, basename)
     if not os.path.exists(basename) or (force_download and url not in already_forced_download):
         already_forced_download.add(url)
         handle = urllib2.urlopen(url)
