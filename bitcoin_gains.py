@@ -361,6 +361,8 @@ class GdaxAccountParser(GdaxParser):
           return None  # handled in fills
         elif type == 'deposit':
           return Transaction(timestamp, 'deposit', amount, 0, id=tid)
+        elif type == 'withdrawal':
+          return Transaction(timestamp, 'withdraw', amount, 0, id=tid)
         else:
             raise ValueError("Unknown transactiont type: %s" % type)
 
