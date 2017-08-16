@@ -43,8 +43,10 @@ parser.add_argument('histories', metavar='FILE', nargs='+',
 
 parser.add_argument('--fmv_url', dest='fmv_urls',
                     action='append',
-                    default=['https://api.bitcoinaverage.com/history/USD/per_day_all_time_history.csv',
-                             'https://blockchain.info/charts/market-price?timespan=all&daysAverageString=1&format=csv'],
+                    default=[
+                        #'https://api.bitcoinaverage.com/history/USD/per_day_all_time_history.csv',
+                        'https://blockchain.info/charts/market-price?timespan=all&daysAverageString=1&format=csv',
+                    ],
                     help='fair market value prices urls')
 
 parser.add_argument('--data', dest='data', default='data.json',
