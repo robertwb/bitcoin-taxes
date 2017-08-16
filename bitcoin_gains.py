@@ -130,7 +130,69 @@ class BitcoindParser(TransactionParser):
             t.fee_btc = 0
         return transactions
 
-class BitcoinInfoParser(TransactionParser):
+class RawBitcoinInfoParser(TransactionParser):
+    @staticmethod
+    def fee(txn):
+        return (sum(input['prev_out']['value'] for input in txn['inputs'])
+                        - sum(output['value'] for output in txn['out'])) / satoshi_to_btc
+    @staticmethod
+    def is_withdrawal(txn, addresses):
+        if any(input['prev_out']['addr'] in addresses for input in txn['inputs']):
+            if not all(input['prev_out']['addr'] in addresses for input in txn['inputs']):
+                raise NotImplementedError("Sends from mixed controlled and not controlled addresses %s" % txn)
+            return True
+        else:
+            return False
+
+class AddressListParser(RawBitcoinInfoParser):
+    """Treat a set of public addresses as a single acount.
+
+    Parses a simple text file with one public address per line, downloading the
+    transaction history from blockchain.info.
+
+    This is useful for any public wallet where you can enumerate addresses
+    used but otherwise can't export transactions.  This includes many
+    lightweight, mobile, and hardware wallets.
+    """
+    def can_parse(self, filename):
+        for line in open(filename):
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            elif re.match('^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$', line):
+                return True
+            else:
+                return False
+    def parse_file(self, filename):
+        addresses = []
+        for line in open(filename):
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            else:
+                addresses.append(line)
+        txns = {}
+        for address in addresses:
+            for txn in json.load(
+                open_cached('https://blockchain.info/address/%s?format=json' % address))['txs']:
+                if txn['hash'] not in txns:
+                    txns[txn['hash']] = txn
+        for txn in txns.values():
+            timestamp = time.localtime(txn['time'])
+            if self.is_withdrawal(txn, addresses):
+                fee = self.fee(txn)
+                for ix, output in enumerate(txn['out']):
+                    if output['addr'] not in addresses:
+                        yield Transaction(timestamp, 'withdraw', -decimal.Decimal(output['value']) / satoshi_to_btc, 0, id="withdraw:%s:%s" % (txn['hash'], ix), account=filename, fee_btc=fee)
+                        fee = 0
+            else:
+                for ix, output in enumerate(txn['out']):
+                    if output['addr'] in addresses:
+                        yield Transaction(timestamp, 'deposit', decimal.Decimal(output['value']) / satoshi_to_btc, 0, id="deposit:%s:%s" % (txn['hash'], ix), account=filename)
+    def merge_some(self, transactions):
+        return transactions
+
+class BitcoinInfoParser(RawBitcoinInfoParser):
     # https://blockchain.info/address/ADDRESS?format=json
     def can_parse(self, filename):
         # TODO: This is way to loose...
@@ -141,13 +203,15 @@ class BitcoinInfoParser(TransactionParser):
         address = all['address']
         for txn in all['txs']:
             timestamp = time.localtime(txn['time'])
-            for ix, input in enumerate(txn['inputs']):
-                if input['prev_out']['addr'] == address:
-                    # TODO: fee
-                    yield Transaction(timestamp, 'withdraw', -decimal.Decimal(input['prev_out']['value']) / satoshi_to_btc, 0, id="%s-%s:%s" % (address, txn['hash'], ix), account=address)
-            for ix, output in enumerate(txn['out']):
-                if output['addr'] == address:
-                    yield Transaction(timestamp, 'deposit', decimal.Decimal(output['value']) / satoshi_to_btc, 0, id="%s-%s:%s" % (address, txn['hash'], ix), account=address)
+            if self.is_withdrawal(txn, [address]):
+                fee = self.fee(txn)
+                for ix, output in enumerate(txn['out']):
+                    yield Transaction(timestamp, 'withdraw', -decimal.Decimal(output['value']) / satoshi_to_btc, 0, id="withdraw:%s:%s" % (txn['hash'], ix), account=address, fee_btc=fee)
+                    fee = 0
+            else:
+                for ix, output in enumerate(txn['out']):
+                    if output['addr'] == address:
+                        yield Transaction(timestamp, 'deposit', decimal.Decimal(output['value']) / satoshi_to_btc, 0, id="%s-%s:%s" % (address, txn['hash'], ix), account=address)
     def merge_some(self, transactions):
         return transactions
 
@@ -871,6 +935,7 @@ def main(args):
       GdaxFillsParser(),
       ElectrumParser(),
       DbDumpParser(),
+      AddressListParser(),
       BitcoinInfoParser(),
       TransactionParser(),
       KrakenParser(),
