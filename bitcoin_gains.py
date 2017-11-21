@@ -849,7 +849,7 @@ def tx_fee(tx_hash):
         print "Downloading fee for tx", tx_hash
         fee = decimal.Decimal(open_cached("https://blockchain.info/q/txfee/" + tx_hash).read().strip()) * decimal.Decimal('1e-8')
         tx_fees[tx_hash] = str(fee)
-        json.dump(tx_fees, open(tx_fee_file, 'w'), ident=4)
+        json.dump(tx_fees, open(tx_fee_file, 'w'), indent=4)
         return fee
 
 def is_long_term(buy, sell):
