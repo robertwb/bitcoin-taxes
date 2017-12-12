@@ -919,16 +919,41 @@ def value_input(prompt, btc, price):
         price = usd / btc
     return usd, price
 
+class FuzzyDict(object):
+    def __init__(self, actual, alias_fn):
+        self._actual = actual
+        self._aliases = {}
+        self._alias_fn = alias_fn
+        for key in self._actual:
+            alias = alias_fn(key)
+            if alias in self._aliases:
+                # Avoid ambiguity.
+                self._aliases[alias] = None
+            else:
+                self._aliases[alias] = key
+    def __contains__(self, key):
+        return key in self._actual or self._aliases.get(self._alias_fn(key)) is not None
+    def __getitem__(self, key):
+        if key in self._actual:
+            return self._actual[key]
+        else:
+            return self._actual[self._aliases.get(self._alias_fn(key))]
+    def __setitem__(self, key, value):
+        self._actual[key] = value
 
 def load_external():
     if os.path.exists(parsed_args.external_transactions_file):
-        return json.load(open(parsed_args.external_transactions_file))
+        actual = json.load(open(parsed_args.external_transactions_file))
     else:
-        return {}
+        actual = {}
+    return FuzzyDict(actual, short_id)
 
 def save_external(external):
     if not parsed_args.non_interactive:
-        json.dump(external, open(parsed_args.external_transactions_file, 'w'), indent=4, sort_keys=True)
+        json.dump(external._actual, open(parsed_args.external_transactions_file, 'w'), indent=4, sort_keys=True)
+
+def short_id(id):
+  return id.rsplit(':', 1)[0]
 
 
 def main(args):
