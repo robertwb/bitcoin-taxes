@@ -76,7 +76,7 @@ parser.add_argument("--list_purchases", default=False, action="store_true")
 
 parser.add_argument("--list_gifts", default=False, action="store_true")
 
-class TransactionParser:
+class TransactionParser(object):
     counter = 0
     def can_parse(self, filename):
         # returns bool
@@ -184,12 +184,12 @@ class AddressListParser(RawBitcoinInfoParser):
                 fee = self.fee(txn)
                 for ix, output in enumerate(txn['out']):
                     if output['addr'] not in addresses:
-                        yield Transaction(timestamp, 'withdraw', -decimal.Decimal(output['value']) / satoshi_to_btc, 0, id="withdraw:%s:%s" % (txn['hash'], ix), account=filename, fee_btc=fee)
+                        yield Transaction(timestamp, 'withdraw', -decimal.Decimal(output['value']) / satoshi_to_btc, 0, id="withdraw:%s:%s" % (txn['hash'], ix), account=filename, fee_btc=fee, txid=txn['hash'])
                         fee = 0
             else:
                 for ix, output in enumerate(txn['out']):
                     if output['addr'] in addresses:
-                        yield Transaction(timestamp, 'deposit', decimal.Decimal(output['value']) / satoshi_to_btc, 0, id="deposit:%s:%s" % (txn['hash'], ix), account=filename)
+                        yield Transaction(timestamp, 'deposit', decimal.Decimal(output['value']) / satoshi_to_btc, 0, id="deposit:%s:%s" % (txn['hash'], ix), account=filename, txid=txn['hash'])
     def merge_some(self, transactions):
         return transactions
 
@@ -207,12 +207,12 @@ class BitcoinInfoParser(RawBitcoinInfoParser):
             if self.is_withdrawal(txn, [address]):
                 fee = self.fee(txn)
                 for ix, output in enumerate(txn['out']):
-                    yield Transaction(timestamp, 'withdraw', -decimal.Decimal(output['value']) / satoshi_to_btc, 0, id="withdraw:%s:%s" % (txn['hash'], ix), account=address, fee_btc=fee)
+                    yield Transaction(timestamp, 'withdraw', -decimal.Decimal(output['value']) / satoshi_to_btc, 0, id="withdraw:%s:%s" % (txn['hash'], ix), account=address, fee_btc=fee, txid=txn['hash'])
                     fee = 0
             else:
                 for ix, output in enumerate(txn['out']):
                     if output['addr'] == address:
-                        yield Transaction(timestamp, 'deposit', decimal.Decimal(output['value']) / satoshi_to_btc, 0, id="%s-%s:%s" % (address, txn['hash'], ix), account=address)
+                        yield Transaction(timestamp, 'deposit', decimal.Decimal(output['value']) / satoshi_to_btc, 0, id="%s-%s:%s" % (address, txn['hash'], ix), account=address, txid=txn['hash'])
     def merge_some(self, transactions):
         return transactions
 
@@ -330,7 +330,7 @@ class ElectrumParser(CsvParser):
             label = 'unknown'
         elif label[0] == '<' and label[-1] != '>':
             label = label[1:]
-        common = dict(usd=None, info=label, id=transaction_hash)
+        common = dict(usd=None, info=label, id=transaction_hash, txid=transaction_hash)
         if value[0] == '+':
             return Transaction(timestamp, 'deposit', value[1:], **common)
         else:
@@ -385,7 +385,11 @@ class CoinbaseParser(CsvParser):
             account = self.filename
         else:
             account = None
-        return Transaction(timestamp, type, btc, usd, info=info, account=account)
+        if re.match('[0-9a-f]{60,64}', row[-1]):
+          txid = row[-1]
+        else:
+          txid = None
+        return Transaction(timestamp, type, btc, usd, info=info, account=account, txid=txid)
 
 
 class GdaxParser(CsvParser):
@@ -657,8 +661,8 @@ def decimal_or_none(o):
 def strip_or_none(o):
     return o.strip() if o else o
 
-class Transaction():
-    def __init__(self, timestamp, type, btc, usd, price=None, fee_usd=0, fee_btc=0, info=None, id=None, account=None, parser=None):
+class Transaction(object):
+    def __init__(self, timestamp, type, btc, usd, price=None, fee_usd=0, fee_btc=0, info=None, id=None, account=None, parser=None, txid=None):
         self.timestamp = timestamp
         self.type = type
         self.btc = decimal_or_none(btc)
@@ -673,6 +677,7 @@ class Transaction():
         self.account = account
         if parser:
             self.parser = parser
+        self.txid = txid
 
     def __cmp__(left, right):
         return cmp(left.timestamp, right.timestamp) or -cmp(left.btc, right.btc) or cmp(left.id, right.id)
@@ -688,7 +693,11 @@ class Transaction():
             dest_str = ', dest=%s' % self.dest_account
         else:
             dest_str = ""
-        return "%s(%s, %s, %s, %s%s%s)" % (self.type, time.strftime('%Y-%m-%d %H:%M:%S', self.timestamp), self.usd, self.btc, self.account, fee_str, dest_str)
+        if self.txid:
+            txid_str = ', txid=%s...' % self.txid[:6]
+        else:
+            txid_str = ''
+        return "%s(%s, %s, %s, %s%s%s%s)" % (self.type, time.strftime('%Y-%m-%d %H:%M:%S', self.timestamp), self.usd, self.btc, self.account, fee_str, dest_str, txid_str)
 
     __repr__ = __str__
 
@@ -1014,7 +1023,16 @@ def main(args):
             handle.write('\n')
         handle.close()
 
+    def replace_with_transfer(withdrawal, deposit, **transaction_kwargs):
+        transfer = Transaction(withdrawal.timestamp, 'transfer', withdrawal.btc, 0, **transaction_kwargs)
+        transfer.account = withdrawal.account
+        transfer.dest_account = deposit.account
+        print "detected transfer: %s + %s -> %s" % (withdrawal, deposit, transfer)
+        all.remove(withdrawal)
+        all.remove(deposit)
+        all.append(transfer)
 
+    # First try to match transfers on amounts.
     deposits = defaultdict(list)
     for t in all:
         if t.type == 'deposit' and t.btc:
@@ -1027,18 +1045,34 @@ def main(args):
             for candidate in matches:
                 if abs(time.mktime(candidate.timestamp) - time.mktime(t.timestamp)) < args.transfer_window_hours * 3600:
                     matches.remove(candidate)
-                    all.remove(t)
-                    all.remove(candidate)
-                    transfer = Transaction(t.timestamp, 'transfer', t.btc, 0, fee_btc=t.fee_btc, fee_usd=t.fee_usd)
-                    transfer.account = t.account
-                    transfer.dest_account = candidate.account
-                    all.append(transfer)
-                    # todo: fee?
-                    print 'match', t, candidate
+                    replace_with_transfer(t, candidate, fee_btc=t.fee_btc, fee_usd=t.fee_usd)
                     break
             else:
                 if matches:
-                    print "no match", t, matches
+                    print "no match on amount", t, matches
+
+    # Next try to match based on txids.  This could come first, but would
+    # run into complications if transaction histories have been massaged to
+    # work before issue #5 was resolved or transactions spanned multiple
+    # withdrawals and deposits.
+
+    # First try to match transfers on amounts.
+    deposits = defaultdict(list)
+    for t in all:
+        if t.type == 'deposit' and t.txid:
+            deposits[t.txid].append(t)
+#    pprint.pprint(deposits.items())
+
+    for t in list(all):
+        if t.type == 'withdraw' and t.btc:
+            matches = deposits.get(t.txid, ())
+            if len(matches) == 1:
+                candidate, = txid_matches
+                matches.remove(candidate)
+                replace_with_transfer(t, candidate, fee_btc=t.btc - candidate.btc, txid=t.txid)
+            elif matches:
+                print "multiple matches", t, matches
+
 
     pprint.pprint(sorted([(key, value) for key, value in deposits.items() if value],
                          key=lambda kv: kv[1][0].timestamp))
