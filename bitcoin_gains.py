@@ -1056,7 +1056,6 @@ def main(args):
     # work before issue #5 was resolved or transactions spanned multiple
     # withdrawals and deposits.
 
-    # First try to match transfers on amounts.
     deposits = defaultdict(list)
     for t in all:
         if t.type == 'deposit' and t.txid:
