@@ -1257,7 +1257,8 @@ def main(args):
                 if t.type == 'transfer':
                     if lost_in_transfer:
                         lost, buy = buy.split(lost_in_transfer)
-                        lost_in_transfer -= lost.btc
+                        if lost:
+                            lost_in_transfer -= lost.btc
                     if buy:
                         push_lot(t.dest_account, buy)
                         account_btc[t.dest_account] += buy.btc
