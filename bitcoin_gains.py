@@ -1066,7 +1066,7 @@ def main(args):
         if t.type == 'withdraw' and t.btc:
             matches = deposits.get(t.txid, ())
             if len(matches) == 1:
-                candidate, = txid_matches
+                candidate, = matches
                 matches.remove(candidate)
                 replace_with_transfer(t, candidate, fee_btc=t.btc - candidate.btc, txid=t.txid)
             elif matches:
