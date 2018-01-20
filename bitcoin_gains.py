@@ -17,6 +17,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 Authors: Robert Bradshaw <robertwb@gmail.com>
 """
 
+import abc
 import argparse
 from collections import defaultdict
 import csv
@@ -55,7 +56,7 @@ parser.add_argument('--data', dest='data', default='data.json',
 
 parser.add_argument('--transfer_window_hours', default=24)
 
-parser.add_argument('--method', default='fifo', help='used to select which lot to sell; one of fifo, lifo, lowest, highest')
+parser.add_argument('--method', default='fifo', help='used to select which lot to sell; one of fifo, lifo, oldest, newest')
 
 parser.add_argument("-y", "--non_interactive", help="don't prompt the user to confirm external transfer details",
                     action="store_true")
@@ -741,9 +742,9 @@ class Lot:
             return self, None
 
     def __cmp__(left, right):
-        if parsed_args.method == 'fifo':
+        if parsed_args.method in ('fifo', 'oldest'):
             return cmp(left.timestamp, right.timestamp) or cmp(left.transaction, right.transaction)
-        elif parsed_args.method == 'lifo':
+        elif parsed_args.method in ('lifo', 'newest'):
             return cmp(right.timestamp, left.timestamp) or cmp(left.transaction, right.transaction)
 
     def __str__(self):
@@ -762,6 +763,82 @@ class Heap:
         return heapq.heappop(self.data)
     def __len__(self):
         return len(self.data)
+
+
+class LotSelector(object):
+    __metaclass__ = abc.ABCMeta
+
+    def __init__(self, data=[]):
+        self._data = list(data)
+
+    @abc.abstractmethod
+    def push(self, lot):
+        pass
+
+    @abc.abstractmethod
+    def pop(self):
+        pass
+
+    @abc.abstractmethod
+    def unpop(self):
+        pass
+
+    def __len__(self):
+        return len(self._data)
+
+    def __iter__(self):
+        copy = type(self)(self._data)
+        while len(copy):
+            yield copy.pop()
+
+
+class Fifo(LotSelector):
+    def push(self, lot):
+        self._data.append(lot)
+    def pop(self):
+        return self._data.pop(0)
+    def unpop(self, lot):
+        self._data.insert(0, lot)
+
+class Lifo(LotSelector):
+    def push(self, lot):
+        self._data.append(lot)
+    def pop(self):
+        return self._data.pop()
+    def unpop(self, lot):
+        self._data.append(lot)
+
+class HeapLotSelector(LotSelector):
+    def push(self, lot):
+        heapq.heappush(self._data, lot)
+    def pop(self):
+        return heapq.heappop(self._data)
+    def unpop(self, lot):
+        self.push(lot)
+
+class OldestLotSelector(HeapLotSelector):
+    def __init__(self, data=[]):
+      # This impacts transaction sorting.
+      assert parsed_args.method == 'oldest'
+      super(OldestLotSelector, self).__init__(data)
+
+class NewestLotSelector(HeapLotSelector):
+    def __init__(self, data=[]):
+      # This impacts transaction sorting.
+      assert parsed_args.method == 'newest'
+      super(NewestLotSelector, self).__init__(data)
+
+def create_lot_selector():
+    if parsed_args.method == 'fifo':
+        return Fifo()
+    elif parsed_args.method == 'lifo':
+        return Lifo()
+    elif parsed_args.method == 'oldest':
+        return OldestLotSelector()
+    elif parsed_args.method == 'newest':
+        return NewestLotSelector()
+    else:
+        raise ValueError('Unknown lot selection type: "%s"' % parsed_args.method)
 
 
 def url_to_filename(url):
@@ -1104,7 +1181,8 @@ def main(args):
         else:
             return 0
     external = load_external()
-    lots = defaultdict(Heap)
+    # Dict of accounts to lots.
+    lots = defaultdict(create_lot_selector)
     all.sort()
     pprint.pprint(all[25:35])
     by_month = RunningReport("%Y-%m")
@@ -1251,7 +1329,7 @@ def main(args):
                 print buy
                 buy, remaining = buy.split(to_sell.btc)
                 if remaining:
-                    lots[t.account].push(remaining)
+                    lots[t.account].unpop(remaining)
                 sell, to_sell = to_sell.split(buy.btc)
                 if t.type == 'transfer':
                     if lost_in_transfer:
@@ -1329,16 +1407,15 @@ def main(args):
     for account, account_lots in sorted(lots.items()):
         print
         print account, account_btc[account]
-        if account_lots.data:
-            cost_basis = sum(lot.usd for lot in account_lots.data)
+        if account_lots:
+            cost_basis = sum(lot.usd for lot in account_lots._data)
             print "cost basis:", round(cost_basis, 2), "fmv:", round(market_price * account_btc[account], 2)
-        account_lots = Heap(account_lots.data)
-        while account_lots:
-            print account_lots.pop()
+        for lot in account_lots:
+            print lot
 
     print
     for account, account_lots in sorted(lots.items()):
-        cost_basis = sum(lot.usd for lot in account_lots.data)
+        cost_basis = sum(lot.usd for lot in account_lots._data)
         print account, account_btc[account], "cost basis:", round(cost_basis, 2), "fmv:", round(market_price * account_btc[account], 2)
 
     if transfered_out:
@@ -1379,7 +1456,6 @@ def main(args):
     by_month.consolidate('%Y').dump(format)
     print
     by_month.consolidate('All time').dump(format)
-
 
 
 
