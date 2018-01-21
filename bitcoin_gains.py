@@ -1161,6 +1161,7 @@ def main(args):
     account_btc = defaultdict(int)
     income = 0
     income_txn = []
+    gift_txns = []
     gains = 0
     long_term_gains = 0
     long_term_gifts = 0
@@ -1313,6 +1314,7 @@ def main(args):
                 total_cost += buy.usd
         else:
             to_sell = Lot(timestamp, -btc, usd, t)
+            sold_lots = []
             gain = 0
             long_term_gain = 0
             long_term_gift = 0
@@ -1329,6 +1331,7 @@ def main(args):
                     buy = lots[t.account].pop()
                 print buy
                 buy, remaining = buy.split(to_sell.btc)
+                sold_lots.append(buy)
                 if remaining:
                     lots[t.account].unpop(remaining)
                 sell, to_sell = to_sell.split(buy.btc)
@@ -1358,6 +1361,8 @@ def main(args):
             gains += gain
             long_term_gains += long_term_gain
             long_term_gifts += long_term_gift
+            if t.type == 'gift':
+                gift_txns.append((t, sold_lots))
         market_price = fmv(t.timestamp)
         total_btc = sum(account_btc.values())
         print account_btc
@@ -1395,14 +1400,17 @@ def main(args):
     if args.list_gifts:
         print
         print "Gifts"
-        for t in all:
-            if t.id in external:
-                data = dict(external[t.id])
-                if data['type'] == 'gift':
-                    data['usd'] = decimal_or_none(data['usd'])
-                    data['btc'] = decimal_or_none(data['btc'])
-                    print "{purchase_date:8} {usd:>10.2f}  {btc:>12.8f}  {account:10}   {info} {note}".format(
-                        **data)
+        for t, gifted_lots in gift_txns:
+            data = dict(external[t.id])
+            data['purchase_date'] = data['purchase_date'].split()[0]
+            data['usd'] = decimal_or_none(data['usd'])
+            data['btc'] = decimal_or_none(data['btc'])
+            print "{purchase_date:8} {usd:>10.2f}  {btc:>12.8f}  {account:10}   {info} {note}".format(
+                **data)
+            cost_basis = sum(lot.usd + lot.dissallowed_loss for lot in gifted_lots)
+            print "Cost Basis {usd:>10.2f}".format(usd=cost_basis)
+            for lot in gifted_lots:
+                print '\t', lot
 
 
     for account, account_lots in sorted(lots.items()):
