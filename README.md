@@ -6,7 +6,7 @@ based on your transaction history(ies).
 
 First, a disclaimer: I am not an accountant or otherwise authorized to give tax advice.
 This code is released under the GPL, which in particular disavows all responsibility for the accuracy of these results.
-That being said, I hope it's helpful and I'll be using it myself.
+That being said, I hope it's helpful and I've be using it for years myself.
 
 Method
 ------
