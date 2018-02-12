@@ -11,7 +11,8 @@ That being said, I hope it's helpful and I'll be using it myself.
 Method
 ------
 
-For tax purposes, this script treats bitcoin as an asset.
+For tax purposes, this script treats bitcoin as personal property,
+consistent with [IRS Notice 2014-21](https://www.irs.gov/newsroom/irs-virtual-currency-guidance).
 Every sale is a taxable event, and the gains computed by taking the difference between the sale price and cost basis.
 As bitcoins are bought and sold in fractional amounts, a sale's gain is computed against one or more buys.
 
@@ -28,6 +29,17 @@ This file can be edited manually or removed to
 re-evaluate the nature of a transaction.
 
 Transfers between known accounts are automatically detected.
+
+A final report is generated, listing the total gains and losses per month/year/all time,
+the lots in each account, etc.
+Realized long-term gains (or losses) are split out in separate column, short term
+gains are the difference between realized gains and long-term gains.
+Long-term gift exempt gains are also split out for ease in itemizing charitable
+contributions.
+This should be sufficient information to file your taxes.
+There are a couple of options listed in `--help` to provide even more detailed
+reports.
+
 
 Use
 ---
