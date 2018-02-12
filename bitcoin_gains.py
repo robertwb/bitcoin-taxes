@@ -20,6 +20,7 @@ Authors: Robert Bradshaw <robertwb@gmail.com>
 import abc
 import argparse
 from collections import defaultdict
+
 import csv
 import decimal
 import hashlib
@@ -955,12 +956,17 @@ class RunningReport:
     def record(self, timestamp, **values):
         self.data[time.strftime(self.date_format, timestamp)] = values
     def dump(self, format):
+        for date, diff in sorted(self.deltas().items()):
+            print format.format(date=date, **diff)
+    def deltas(self):
+        all = {}
         last = {}
         for date in sorted(self.data):
             data = self.data[date]
             diff = dict((key, value-last.get(key, 0)) for key, value in data.items())
-            print format.format(date=date, **diff)
+            all[date] = diff
             last = data
+        return all
     def consolidate(self, date_format):
         report = RunningReport(date_format)
         for date, values in sorted(self.data.items()):
@@ -1465,6 +1471,21 @@ def main(args):
     by_month.consolidate('%Y').dump(format)
     print
     by_month.consolidate('All time').dump(format)
+
+    need_appraisal = []
+    for year, delta in by_month.consolidate('%Y').deltas().items():
+        if delta['long_term_gifts'] >= 5000:
+            need_appraisal.append(year)
+    if need_appraisal:
+        if len(need_appraisal) <= 2:
+            need_appraisal_string = ' and '.join(need_appraisal)
+        else:
+            need_appraisal_string.formatted = ', '.join(need_appraisal[:-1]) + ", and " + need_appraisal[-1]
+        print
+        print "A qualified appraisal is needed for charitable deductions in %s." % need_appraisal_string
+        if not args.list_gifts:
+            print "Run with --list_gifts for lot details."
+        print
 
 
 
