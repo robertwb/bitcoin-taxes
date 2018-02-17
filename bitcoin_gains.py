@@ -73,6 +73,8 @@ parser.add_argument("--nowash", default=False, action="store_true")
 
 parser.add_argument("--buy_in_sell_month", default=False, action="store_true")
 
+parser.add_argument("--cost_basis", default=False, action="store_true")
+
 parser.add_argument("--end_date", metavar="YYYY-MM-DD")
 
 parser.add_argument("--list_purchases", default=False, action="store_true")
@@ -1174,6 +1176,8 @@ def main(args):
     total_buy = 0
     total_sell = 0
     total_cost_basis = 0
+    long_term_cost_basis = 0
+    long_term_gift_cost_basis = 0
     recent_sells = []
     dissallowed_loss = 0
     exit = False
@@ -1356,11 +1360,13 @@ def main(args):
                     total_cost_basis += buy.usd
                     if is_long_term(buy, sell):
                         long_term_gain += sell.usd - buy.usd
+                        long_term_cost_basis += buy.usd
                     total_cost -= buy.usd - buy.dissallowed_loss
                     if t.type == 'transfer_out':
                         transfered_out.append((t, buy))
                     elif t.type == 'gift' and is_long_term(buy, sell):
                         long_term_gift += sell.usd - buy.usd
+                        long_term_gift_cost_basis += buy.usd
                     else:
                         dissallowed_loss -= buy.dissallowed_loss
                         recent_sells.append((sell, buy))
@@ -1377,8 +1383,13 @@ def main(args):
         unrealized_gains = market_price * total_btc - total_cost - dissallowed_loss
         print "gains", gains, "long_term_gains", long_term_gains, "unrealized_gains", unrealized_gains, "total", gains + unrealized_gains
         print
-        by_month.record(t.timestamp, income=income, gains=gains, long_term_gains=long_term_gains, unrealized_gains=unrealized_gains, total_cost=total_cost, total=income+gains+unrealized_gains,
-                        total_buy=total_buy, total_sell=total_sell, total_cost_basis=total_cost_basis, long_term_gifts=long_term_gifts)
+        by_month.record(t.timestamp, income=income,
+                        total_buy=total_buy, total_sell=total_sell,
+                        unrealized_gains=unrealized_gains,
+                        gains=gains, long_term_gains=long_term_gains, short_term_gains=gains-long_term_gains,total_cost=total_cost,
+                        total_cost_basis=total_cost_basis, long_term_cost_basis=long_term_cost_basis, short_term_cost_basis=total_cost_basis-long_term_cost_basis,
+                        long_term_gifts=long_term_gifts, long_term_gift_cost_basis=long_term_gift_cost_basis,
+                        total=income+gains+unrealized_gains)
     save_external(external)
 
     market_price = fmv(time.gmtime(time.time() - 24*60*60))
@@ -1460,11 +1471,23 @@ def main(args):
 
 #    format = "{date:8} {income:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
 #    print format.replace('.2f', '').format(date='date', income='income', gains='realized gains', long_term_gains='long term', unrealized_gains='unrealized', total='total  ')
-    if args.buy_in_sell_month:
+    names = dict(date='date', income='income',
+        gains='realized\ngains', long_term_gains='long term\ngains',
+        long_term_gifts='gift exempt\ngains', long_term_gift_cost_basis='gift exempt\ncost basis',
+        unrealized_gains='unrealized\ngains', total='total  ', total_sell='sell',
+        total_cost_basis='cost basis', long_term_cost_basis='long term\ncost basis', total_buy='buy',
+        short_term_cost_basis='short term\ncost basis', short_term_gains='short term\ngains')
+    if args.cost_basis:
+        format = "{date:8} {short_term_cost_basis:>12.2f} {short_term_gains:>12.2f} {long_term_cost_basis:>12.2f} {long_term_gains:>12.2f} {long_term_gift_cost_basis:>12.2f} {long_term_gifts:>12.2f} {gains:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
+#         print format.replace('.2f', '').format(
+#             date='', short_term_cost_basis='', long_term_cost_basis='cost bais',
+#             short_term_gains='gains', long_term_gains='', long_term_gifts='', gains='', unrealized_gains='', total='')
+    elif args.buy_in_sell_month:
         format = "{date:8} {income:>12.2f} {total_cost_basis:>12.2f} {total_sell:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {long_term_gifts:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
     else:
         format = "{date:8} {income:>12.2f} {total_buy:>12.2f} {total_sell:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {long_term_gifts:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
-    print format.replace('.2f', '').format(date='date', income='income', gains='realized gains', long_term_gains='long term', long_term_gifts='gift exempt', unrealized_gains='unrealized', total='total  ', total_sell='sell', total_cost_basis='buy', total_buy='buy')
+    print format.replace('.2f', '').format(**{name: ''.join(label.split('\n')[:-1]) for name, label in names.items()})
+    print format.replace('.2f', '').format(**{name: label.split('\n')[-1] for name, label in names.items()})
     by_month.dump(format)
     print
     print "Annual"

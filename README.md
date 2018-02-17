@@ -43,7 +43,7 @@ or [CryptoAppraisers](https://cryptoappraisers.com/)
 or finding another appraiser willing to do the research on Bitcoin.)
 This should be sufficient information to file your taxes.
 There are a couple of options listed in `--help` to provide even more detailed
-reports.
+reports and options.  In particular, the `--cost_basis` flag is quite useful.
 
 
 Use
