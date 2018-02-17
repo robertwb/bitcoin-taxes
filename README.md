@@ -39,7 +39,7 @@ contributions.
 (Note that for gifts exceeding $5,000 in value, a qualified appraisal
 and signed Form 8283 is also required to claim the deduction.
 Some options are [CharitableSolutions](http://charitablesolutionsllc.com/virtual-currency-appraisals/)
-or [CryptoAppraisers](http://cryptoappraisers.com/)
+or [CryptoAppraisers](https://cryptoappraisers.com/)
 or finding another appraiser willing to do the research on Bitcoin.)
 This should be sufficient information to file your taxes.
 There are a couple of options listed in `--help` to provide even more detailed
