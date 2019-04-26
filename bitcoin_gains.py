@@ -1167,6 +1167,8 @@ def main(args):
     account_btc = defaultdict(int)
     income = 0
     income_txn = []
+    gross_receipts = 0
+    gross_receipts_txn = []
     gift_txns = []
     gains = 0
     long_term_gains = 0
@@ -1220,6 +1222,9 @@ def main(args):
                 elif data['type'] in ('income', 'expense'):
                     income_txn.append((time.strftime('%Y-%m-%d', t.timestamp), -usd))
                     income -= usd
+                    if data['type'] == 'income':
+                        gross_receipts_txn.append((time.strftime('%Y-%m-%d', t.timestamp), -usd))
+                        gross_receipts -= usd
                 elif data['type'] == 'gift':
                     t.type = 'gift'
                 elif data['type'] in ('buy', 'sale', 'purchase'):
@@ -1258,6 +1263,8 @@ def main(args):
                         if type == 'income':
                             income_txn.append((time.strftime('%Y-%m-%d', t.timestamp), -usd))
                             income -= usd
+                            gross_receipts_txn.append((time.strftime('%Y-%m-%d', t.timestamp), -usd))
+                            gross_receipts -= usd
                 else:
                     if t.type == 'fee':
                         type = 'fee'
@@ -1381,7 +1388,7 @@ def main(args):
         unrealized_gains = market_price * total_btc - total_cost - dissallowed_loss
         print "gains", gains, "long_term_gains", long_term_gains, "unrealized_gains", unrealized_gains, "total", gains + unrealized_gains
         print
-        by_month.record(t.timestamp, income=income,
+        by_month.record(t.timestamp, income=income, gross_receipts=gross_receipts,
                         total_buy=total_buy, total_sell=total_sell,
                         unrealized_gains=unrealized_gains,
                         gains=gains, long_term_gains=long_term_gains, short_term_gains=gains-long_term_gains,total_cost=total_cost,
@@ -1398,6 +1405,10 @@ def main(args):
 
     print "Income"
     for date, amount in income_txn:
+        print "{date:8} {amount:>12.2f}".format(date=date, amount=amount)
+
+    print "\nGross Receipts"
+    for date, amount in gross_receipts_txn:
         print "{date:8} {amount:>12.2f}".format(date=date, amount=amount)
 
     if args.list_purchases:
@@ -1469,7 +1480,7 @@ def main(args):
 
 #    format = "{date:8} {income:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
 #    print format.replace('.2f', '').format(date='date', income='income', gains='realized gains', long_term_gains='long term', unrealized_gains='unrealized', total='total  ')
-    names = dict(date='date', income='income',
+    names = dict(date='date', income='income', gross_receipts='gross\nreceipts',
         gains='realized\ngains', long_term_gains='long term\ngains',
         long_term_gifts='gift exempt\ngains', long_term_gift_cost_basis='gift exempt\ncost basis',
         unrealized_gains='unrealized\ngains', total='total  ', total_sell='sell',
@@ -1481,9 +1492,9 @@ def main(args):
 #             date='', short_term_cost_basis='', long_term_cost_basis='cost bais',
 #             short_term_gains='gains', long_term_gains='', long_term_gifts='', gains='', unrealized_gains='', total='')
     elif args.buy_in_sell_month:
-        format = "{date:8} {income:>12.2f} {total_cost_basis:>12.2f} {total_sell:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {long_term_gifts:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
+        format = "{date:8} {income:>12.2f} {gross_receipts:>12.2f} {total_cost_basis:>12.2f} {total_sell:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {long_term_gifts:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
     else:
-        format = "{date:8} {income:>12.2f} {total_buy:>12.2f} {total_sell:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {long_term_gifts:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
+        format = "{date:8} {income:>12.2f} {gross_receipts:>12.2f} {total_buy:>12.2f} {total_sell:>12.2f} {gains:>12.2f} {long_term_gains:>12.2f} {long_term_gifts:>12.2f} {unrealized_gains:>12.2f} {total:>12.2f}"
     print format.replace('.2f', '').format(**{name: ''.join(label.split('\n')[:-1]) for name, label in names.items()})
     print format.replace('.2f', '').format(**{name: label.split('\n')[-1] for name, label in names.items()})
     by_month.dump(format)
