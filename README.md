@@ -52,7 +52,7 @@ Use
 First, download/export all the transaction histories from all your exchanges/wallets.
 Several exchanges (e.g. Bitstamp, Coinbase, Gdax, Kraken, and MtGox) are supported; more formats can be easily added.
 Note that for MtGox both the BTC and USD files must be downloaded (with BTC or USD in the filename) as neither has the full history.
-Transactions exported from your local wallets such as the electrum and the reference client can be imported (e.g. `bitcoind list transactions '*' 1000000 > local-accounts.json`).
+Transactions exported from your local wallets such as the electrum and the reference client can be imported (e.g. `bitcoin-cli listtransactions '*' 1000000 > local-accounts.json`).
 Additionally, any set of public addresses (e.g. from a wallet that does not support export)
 can be treated as a single account by simply enumerating them in a text file.
 
