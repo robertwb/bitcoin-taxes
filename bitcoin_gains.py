@@ -324,14 +324,12 @@ class ElectrumParser(CsvParser):
     
     def can_parse(self, filename):
         first_line = open(filename).readline().strip()
-
         if re.match ('transaction_hash,label,confirmations,value,timestamp', first_line): # Electrum 2.5.4
             self.electrum_version = 2
         elif re.match ('transaction_hash,label,confirmations,value,fiat_value,fee,fiat_fee,timestamp', first_line): # Electrum 3.x
             self.electrum_version = 3
         else:
             return False
-
         return True
 
     def parse_row(self, row):
