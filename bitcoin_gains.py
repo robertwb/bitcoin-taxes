@@ -367,6 +367,9 @@ class ElectrumParser(CsvParser):
             else:
                 return Transaction(timestamp, 'withdraw', true_value, fee_btc=fee, **common)
 
+    def merge_some(self, transactions):
+        return transactions
+
 class CoinbaseParser(CsvParser):
     expected_header = r'(User,.*,[0-9a-f]+)|(^Transactions$)'
     started = False
