@@ -107,7 +107,10 @@ class TransactionParser(object):
 class BitcoindParser(TransactionParser):
     def can_parse(self, filename):
         # TODO: This is way to loose...
-        return re.sub(r'\s+', '', open(filename).read(100)).startswith('[{"account":')
+        start = re.sub(r'\s+', '', open(filename).read(100))
+        # Old Bitcoin Core versions begin with "account" key; newer versions
+        # begin with "address" key instead.
+        return start.startswith('[{"account":') or start.startswith('[{"address":')
     def parse_file(self, filename):
         for item in json.load(open(filename)):
             timestamp = time.localtime(item['time'])
