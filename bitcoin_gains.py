@@ -118,6 +118,10 @@ class BitcoindParser(TransactionParser):
                 account = ('bitcoind-%s' % item['account']).strip('-')
             else:
                 account = 'bitcoind'
+            confirmations = item['confirmations']
+            # Negative confirmations indicate a conflicted transaction.
+            if confirmations < 0:
+                continue
             if item['category'] == 'receive':
                 yield Transaction(timestamp, 'deposit', item['amount'], 0, 0, id=item['txid'], info=info, account=account)
             elif item['category'] == 'generate':
