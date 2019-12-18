@@ -327,14 +327,37 @@ class TransactionParser(CsvParser):
 
 class ElectrumParser(CsvParser):
     # expected_header = 'transaction_hash,label,confirmations,value,fee,balance,timestamp'
-    expected_header = 'transaction_hash,label,confirmations,value,timestamp'  # 2.5.4
+    electrum_version = 0
+    
+    def can_parse(self, filename):
+        first_line = open(filename).readline().strip()
+        if re.match ('transaction_hash,label,confirmations,value,timestamp', first_line): # Electrum 2.5.4
+            self.electrum_version = 2
+        elif re.match ('transaction_hash,label,confirmations,value,fiat_value,fee,fiat_fee,timestamp', first_line): # Electrum 3.x
+            self.electrum_version = 3
+        else:
+            return False
+        return True
 
     def parse_row(self, row):
-#        transaction_hash,label,confirmations,value,fee,balance,timestamp = row
-        transaction_hash,label,confirmations,value,timestamp = row
-        # TODO: Why isn't this exported anymore?
-        fee = tx_fee(transaction_hash)
-        timestamp = time.strptime(timestamp, '%Y-%m-%d %H:%M')
+        if self.electrum_version == 2:
+            transaction_hash,label,confirmations,value,timestamp = row
+            fee = tx_fee(transaction_hash)
+            # TODO: Why isn't this exported anymore?
+            timestamp = time.strptime(timestamp, '%Y-%m-%d %H:%M')
+        elif self.electrum_version == 3:
+            transaction_hash,label,confirmations,value,fiat_value,fee,fiat_fee,timestamp = row
+            fee = fee[:-4] #Remove the " BTC"
+            timestamp = time.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+            value = value[:-4] #Remove the " BTC" at the end
+            if value[-1] == ".":
+                value = value[:-1] #remove decimal point if nothing follows it. Not doing so confuses python.
+            if value[0] != "-": #So it's a positive... add a "+" to make it like the electrum 2 string
+                value = "+" + value
+        else:
+            raise ValueError, "Electrum parser: Unknown format"
+        
+            
         timestamp = time.localtime(time.mktime(timestamp) + 7*60*60)
         if not label:
             label = 'unknown'
@@ -350,6 +373,9 @@ class ElectrumParser(CsvParser):
                 return Transaction(timestamp, 'fee', fee, **common)
             else:
                 return Transaction(timestamp, 'withdraw', true_value, fee_btc=fee, **common)
+
+    def merge_some(self, transactions):
+        return transactions
 
 class CoinbaseParser(CsvParser):
     expected_header = r'(User,.*,[0-9a-f]+)|(^Transactions$)'
