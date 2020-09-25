@@ -47,7 +47,7 @@ parser.add_argument('histories', metavar='FILE', nargs='+',
 parser.add_argument('--fmv_url', dest='fmv_urls',
                     action='append',
                     default=[
-                        'https://blockchain.info/charts/market-price?timespan=all&daysAverageString=1&format=csv',
+                        'https://api.blockchain.info/charts/market-price?timespan=all&daysAverageString=1&format=csv',
                     ],
                     help='fair market value prices urls')
 
