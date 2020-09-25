@@ -685,7 +685,7 @@ class DbDumpParser(TransactionParser):
         return transactions
 
 
-zero = decimal.Decimal('0', 8)
+zero = decimal.Decimal('0', decimal.Context(8))
 tenth = decimal.Decimal('0.1')
 satoshi_to_btc = decimal.Decimal('1e8')
 def roundd(x, digits):
@@ -715,8 +715,11 @@ class Transaction(object):
             self.parser = parser
         self.txid = txid
 
-    def __cmp__(left, right):
-        return cmp(left.timestamp, right.timestamp) or -cmp(left.btc, right.btc) or cmp(left.id, right.id)
+    def __eq__(left, right):
+        return left.timestamp == right.timestamp and left.btc == right.btc and left.id == right.id
+
+    def __lt__(left, right):
+        return (left.timestamp, right.btc, left.id) < (right.timestamp, left.btc, right.id)
 
     def __str__(self):
         if self.fee_btc:
@@ -776,11 +779,14 @@ class Lot:
         else:
             return self, None
 
-    def __cmp__(left, right):
+    def __eq__(left, right):
+        return left.timestamp == right.timestamp and left.transaction == right.transaction
+
+    def __lt__(left, right):
         if parsed_args.method in ('fifo', 'oldest'):
-            return cmp(left.timestamp, right.timestamp) or cmp(left.transaction, right.transaction)
+            return (left.timestamp, left.transaction) < (right.timestamp, right.transaction)
         elif parsed_args.method in ('lifo', 'newest'):
-            return cmp(right.timestamp, left.timestamp) or cmp(left.transaction, right.transaction)
+            return (right.timestamp, left.transaction) < (left.timestamp, right.transaction)
 
     def __str__(self):
         dissallowed_loss = ", dissallowed_loss=%s" % self.dissallowed_loss if self.dissallowed_loss else ""
@@ -876,7 +882,7 @@ def create_lot_selector():
 
 def url_to_filename(url):
     parts = urllib.parse.urlparse(url)
-    hash = hashlib.sha1(url).hexdigest()
+    hash = hashlib.sha1(url.encode('utf-8')).hexdigest()
     raw = '-'.join([parts.hostname] + parts.path.split('/') + parts.query.split('&'))
     return re.sub('[^a-zA-Z0-9_-]', '_', raw[:100]) + '-' + hash[:8]
 
