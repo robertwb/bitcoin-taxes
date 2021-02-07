@@ -905,7 +905,7 @@ def url_to_filename(url):
     return re.sub('[^a-zA-Z0-9_-]', '_', raw[:100]) + '-' + hash[:8]
 
 already_forced_download = set()
-def open_cached(url, force_download=False, cache_dir='download-cache'):
+def open_cached(url, force_download=False, cache_dir='download-cache', sleep=0):
     global already_forced_download
     if '://' not in url:
         # It's a (possibly relative) file path.
@@ -919,7 +919,12 @@ def open_cached(url, force_download=False, cache_dir='download-cache'):
         os.rename(old_basename, basename)
     if not os.path.exists(basename) or (force_download and url not in already_forced_download):
         already_forced_download.add(url)
-        handle = urllib.request.urlopen(url)
+        time.sleep(sleep)
+        request = urllib.request.Request(
+            url=url,
+            data=None,
+            headers={'User-Agent': 'Mozilla/5.0 (%s)' % os.path.basename(__file__)})
+        handle = urllib.request.urlopen(request)
         try:
             open(basename, 'wb').write(handle.read())
         except:
@@ -928,18 +933,32 @@ def open_cached(url, force_download=False, cache_dir='download-cache'):
 
 prices = {}
 def fmv(timestamp):
+    if timestamp is None:
+        quote = json.load(urllib.request.urlopen('https://api.coindesk.com/v1/bpi/currentprice.json'))
+        return round(decimal.Decimal(quote['bip']['USD']['rate']), 2)
     date = time.strftime('%Y-%m-%d', timestamp)
     if date not in prices:
+        # For consistency, use previously fetched prices.
         fetch_prices(False)
     if date not in prices:
-        fetch_prices(True)
-    if date not in prices:
-        prev = [d for d in prices if d < date]
-        if not prev:
-            raise ValueError("No price for %s" % date)
-        else:
-            date = max(prev)
+        fetch_price(date)
     return prices[date]
+
+def fetch_price(date, force_download=False):
+    year = int(date.split('-')[0])
+    historical_url = ('https://web-api.coinmarketcap.com/v1/cryptocurrency/'
+                      'ohlcv/historical?symbol=BTC&convert=USD&time_start=%d-01-01&time_end=%d-12-31' % (year, year))
+    data = json.load(open_cached(historical_url, force_download=force_download, sleep=2))
+    for quote in data['data']['quotes']:
+        date = quote['time_open'][:10]
+        low = quote['quote']['USD']['low']
+        high = quote['quote']['USD']['high']
+        prices[date] = round(decimal.Decimal((low + high) / 2), 2)
+    if date not in prices:
+        if force_download:
+            pass
+        else:
+            return fetch_price(date, force_download=True)
 
 def fetch_prices(force_download=False):
     print("Fetching fair market values...")
