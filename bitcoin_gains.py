@@ -1088,7 +1088,7 @@ def short_id(id):
   return id.rsplit(':', 1)[0]
 
 
-def main(args):
+def parse_all(args):
 
     if args.end_date:
         max_timestamp = time.strptime(args.end_date + " 23:59:59", "%Y-%m-%d %H:%M:%S")
@@ -1134,11 +1134,11 @@ def main(args):
         by_date[t.parser, t.id].append(t)
     for key, value in by_date.items():
         by_date[key] = key[0].merge_some(value)
-    all = [t for merged in by_date.values() for t in merged]
+    all = [t for merged in by_date.values() for t in merged if t.timestamp <= max_timestamp]
     all.sort()
 
-    if parsed_args.flat_transactions_file:
-        handle = open(parsed_args.flat_transactions_file, 'w')
+    if args.flat_transactions_file:
+        handle = open(args.flat_transactions_file, 'w')
         handle.write(Transaction.csv_header())
         handle.write('\n')
         for t in all:
@@ -1146,6 +1146,10 @@ def main(args):
             handle.write('\n')
         handle.close()
 
+    return all
+
+
+def match_transactions(all, args):
     def replace_with_transfer(withdrawal, deposit, **transaction_kwargs):
         transfer = Transaction(withdrawal.timestamp, 'transfer', withdrawal.btc, 0, **transaction_kwargs)
         transfer.account = withdrawal.account
@@ -1198,6 +1202,18 @@ def main(args):
 
     pprint.pprint(sorted([(key, value) for key, value in deposits.items() if value],
                          key=lambda kv: kv[1][0].timestamp))
+
+    return all
+
+
+def main(args):
+    all = match_transactions(parse_all(args), args)
+
+    if args.end_date:
+        max_timestamp = time.strptime(args.end_date + " 23:59:59", "%Y-%m-%d %H:%M:%S")
+    else:
+        max_timestamp = float('inf'),
+
     for t in all:
         if t.type not in ('trade', 'transfer'):
             print(t)
