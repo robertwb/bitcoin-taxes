@@ -475,10 +475,9 @@ class GdaxAccountParser(GdaxParser):
         else:
             account = self.default_account()
         type, stime, amount, _, unit, tid, _, _ = row
-        if unit == 'USD':
-            return None
         if unit != 'BTC':
-            raise ValueError("Only BTC accounts supported.")
+            # Ignore non-BTC withdrawals and deposits.
+            return None
         timestamp = self.parse_time(stime)
         if type == 'match':
           return None  # handled in fills
@@ -1170,6 +1169,8 @@ def parse_all(args):
     ]
     all = []
     for file in args.histories:
+        if '/ignore/' in file:
+            continue
         for parser in parsers:
             if parser.can_parse(file):
                 print(file, parser)
