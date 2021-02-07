@@ -242,6 +242,7 @@ class CsvParser(TransactionParser):
         for ix, row in enumerate(csv.reader(open(filename))):
             if not row or first:
                 first = False
+                self.header = row
                 continue
             elif row[0].startswith('#'):
                 continue
@@ -430,18 +431,25 @@ class CoinbaseParser(CsvParser):
         return Transaction(timestamp, type, btc, usd, info=info, account=account, txid=txid)
 
 
+# AKA Coinbase Pro
 class GdaxParser(CsvParser):
 
     def parse_time(self, stime):
         return time.strptime(stime.replace('Z', '000'), '%Y-%m-%dT%H:%M:%S.%f')
 
     def default_account(self):
-        return 'gdax'
+        return 'CoinbasePro'
 
 class GdaxFillsParser(GdaxParser):
-    expected_header = 'trade id,product,side,created at,size,size unit,price,fee,total,price/fee/total unit'
+    expected_header = '(portfolio,)?trade id,product,side,created at,size,size unit,price,fee,total,price/fee/total unit'
 
     def parse_row(self, row):
+        if self.header[0] == 'portfolio':
+            account = row.pop(0)
+            if account == 'default':
+                account = self.default_account()
+        else:
+            account = self.default_account()
         trade, product, buy_sell, stime, btc, unit, price, fee_usd, total, pft_unit = row
         if product != 'BTC-USD':
             return None
@@ -449,27 +457,35 @@ class GdaxFillsParser(GdaxParser):
         timestamp = self.parse_time(stime)
         usd = decimal.Decimal(total) + decimal.Decimal(fee_usd)
         if buy_sell == 'BUY':
-          return Transaction(timestamp, 'trade', btc, usd, fee_usd=fee_usd)
+          return Transaction(timestamp, 'trade', btc, usd, fee_usd=fee_usd, account=account)
         elif buy_sell == 'SELL':
-          return Transaction(timestamp, 'trade', '-' + btc, usd, fee_usd=fee_usd)
+          return Transaction(timestamp, 'trade', '-' + btc, usd, fee_usd=fee_usd, account=account)
         else:
             raise ValueError("Unknown transactiont type: %s" % buy_sell)
 
 
 class GdaxAccountParser(GdaxParser):
-    expected_header = 'type,time,amount,balance,amount/balance unit,transfer id,trade id,order id'
+    expected_header = '(portfolio,)?type,time,amount,balance,amount/balance unit,transfer id,trade id,order id'
 
     def parse_row(self, row):
+        if self.header[0] == 'portfolio':
+            account = row.pop(0)
+            if account == 'default':
+                account = self.default_account()
+        else:
+            account = self.default_account()
         type, stime, amount, _, unit, tid, _, _ = row
+        if unit == 'USD':
+            return None
         if unit != 'BTC':
             raise ValueError("Only BTC accounts supported.")
         timestamp = self.parse_time(stime)
         if type == 'match':
           return None  # handled in fills
         elif type == 'deposit':
-          return Transaction(timestamp, 'deposit', amount, 0, id=tid)
+          return Transaction(timestamp, 'deposit', amount, 0, id=tid, account=account)
         elif type == 'withdrawal':
-          return Transaction(timestamp, 'withdraw', amount, 0, id=tid)
+          return Transaction(timestamp, 'withdraw', amount, 0, id=tid, account=account)
         else:
             raise ValueError("Unknown transactiont type: %s" % type)
 
