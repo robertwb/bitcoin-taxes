@@ -945,6 +945,29 @@ def fmv(timestamp):
     return prices[date]
 
 def fetch_price(date, force_download=False):
+    if any('api.blockchain.info' in url for url in parsed_args.fmv_urls):
+        fetch_price_blockchain(date, force_download=force_download)
+
+    if date not in prices:
+        # Fall back to coinmarketcap.
+        fetch_price_coinmarketcap(date, force_download)
+
+def fetch_price_blockchain(date, force_download=False):
+    year = int(date.split('-')[0])
+    historical_url = ('https://api.blockchain.info/charts/market-price'
+                      '?start=%s-12-31&timespan=1year&daysAverageString=1&format=csv' % (year - 1))
+    for line in open_cached(historical_url, force_download=force_download, sleep=2):
+        line = line.strip()
+        if line:
+            timestamp, price = line.split(',')
+            prices[timestamp[:10]] = round(decimal.Decimal(price), 2)
+    if date not in prices:
+        if force_download:
+            pass
+        else:
+            return fetch_price_blockchain(date, force_download=True)
+
+def fetch_price_coinmarketcap(date, force_download=False):
     year = int(date.split('-')[0])
     historical_url = ('https://web-api.coinmarketcap.com/v1/cryptocurrency/'
                       'ohlcv/historical?symbol=BTC&convert=USD&time_start=%d-01-01&time_end=%d-12-31' % (year, year))
@@ -958,7 +981,7 @@ def fetch_price(date, force_download=False):
         if force_download:
             pass
         else:
-            return fetch_price(date, force_download=True)
+            return fetch_price_coinmarketcap(date, force_download=True)
 
 def fetch_prices(force_download=False):
     print("Fetching fair market values...")
