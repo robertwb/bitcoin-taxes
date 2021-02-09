@@ -709,6 +709,9 @@ def roundd(x, digits):
     return x.quantize(tenth**digits)
 
 def decimal_or_none(o):
+    if isinstance(o, str) and o.startswith('--'):
+        # Double negative.
+        o = o[2:]
     return None if o is None else decimal.Decimal(o)
 
 def strip_or_none(o):
@@ -736,7 +739,17 @@ class Transaction(object):
         return left.timestamp == right.timestamp and left.btc == right.btc and left.id == right.id
 
     def __lt__(left, right):
-        return (left.timestamp, right.btc, left.id) < (right.timestamp, left.btc, right.id)
+        if left.timestamp == right.timestamp:
+            # Prioritize transferring in to avoid negative balance.
+            if left.type == 'transfer' and left.dest_account == right.account:
+                return left.btc < 0
+            elif right.type == 'transfer' and right.dest_account == left.account:
+                return right.btc > 0
+            else:
+                return (right.btc, str(left.id)) < (left.btc, str(right.id))
+        else:
+            return left.timestamp < right.timestamp
+#        return (left.timestamp, right.btc, str(left.id)) < (right.timestamp, left.btc, str(right.id))
 
     def __str__(self):
         if self.fee_btc:
@@ -955,6 +968,7 @@ def fetch_price_blockchain(date, force_download=False):
     year = int(date.split('-')[0])
     historical_url = ('https://api.blockchain.info/charts/market-price'
                       '?start=%s-12-31&timespan=1year&daysAverageString=1&format=csv' % (year - 1))
+    print(historical_url)
     for line in open_cached(historical_url, force_download=force_download, sleep=2):
         line = line.strip()
         if line:
@@ -970,6 +984,7 @@ def fetch_price_coinmarketcap(date, force_download=False):
     year = int(date.split('-')[0])
     historical_url = ('https://web-api.coinmarketcap.com/v1/cryptocurrency/'
                       'ohlcv/historical?symbol=BTC&convert=USD&time_start=%d-01-01&time_end=%d-12-31' % (year, year))
+    print(historical_url)
     data = json.load(open_cached(historical_url, force_download=force_download, sleep=2))
     for quote in data['data']['quotes']:
         date = quote['time_open'][:10]
@@ -1229,7 +1244,8 @@ def match_transactions(all, args):
         if t.type == 'withdraw' and t.btc:
             matches = deposits.get(-t.btc, ())
             for candidate in matches:
-                if abs(time.mktime(candidate.timestamp) - time.mktime(t.timestamp)) < args.transfer_window_hours * 3600:
+                if (abs(time.mktime(candidate.timestamp) - time.mktime(t.timestamp)) < args.transfer_window_hours * 3600
+                    and t.account != candidate.account):
                     matches.remove(candidate)
                     replace_with_transfer(t, candidate, fee_btc=t.fee_btc, fee_usd=t.fee_usd)
                     break
@@ -1254,7 +1270,9 @@ def match_transactions(all, args):
             if len(matches) == 1:
                 candidate, = matches
                 matches.remove(candidate)
-                replace_with_transfer(t, candidate, fee_btc=t.btc - candidate.btc, txid=t.txid)
+                fee = -(t.btc + candidate.btc)
+                t.btc += fee
+                replace_with_transfer(t, candidate, fee_btc=fee, txid=t.txid)
             elif matches:
                 print("multiple matches", t, matches)
 
@@ -1273,6 +1291,7 @@ def main(args):
     else:
         max_timestamp = float('inf'),
 
+    all.sort()
     for t in all:
         if t.type not in ('trade', 'transfer'):
             print(t)
@@ -1310,7 +1329,6 @@ def main(args):
     # Dict of accounts to lots.
     lots = defaultdict(create_lot_selector)
     all.sort()
-    pprint.pprint(all[25:35])
     by_month = RunningReport("%Y-%m")
     transfered_out = []
     print()
