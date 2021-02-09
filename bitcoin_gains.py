@@ -44,6 +44,9 @@ parser = argparse.ArgumentParser(description='Compute capital gains/losses.')
 parser.add_argument('histories', metavar='FILE', nargs='+',
                    help='a csv or json file')
 
+parser.add_argument('--ignore_old_coinbase', default='auto',
+                    help='Ignore old coinbase files (in favor of api-downloaded ones).')
+
 parser.add_argument('--fmv_url', dest='fmv_urls',
                     action='append',
                     default=[
@@ -380,12 +383,90 @@ class ElectrumParser(CsvParser):
     def merge_some(self, transactions):
         return transactions
 
+
+class NewCoinbaseParser(TransactionParser):
+    def can_parse(self, filename):
+        first_line = open(filename).readline().strip()
+        if 'You can use this transaction report to inform your likely tax obligations' in first_line and 'Coinbase' in first_line:
+            raise RuntimeError(
+                'Insufficient information in new-style coinbase transaction files; '
+                'please use download-coinbase.py instead.')
+
+
+class DownloadedCoinbaseParser(TransactionParser):
+    expected_header = '# Coinbase downloaded transactions .*'
+    def can_parse(self, filename):
+        return re.match(self.expected_header, open(filename).readline().strip())
+    def parse_file(self, filename):
+        with open(filename) as fin:
+            fin.readline()
+            data = json.load(fin)
+        account = 'Coinbase:%s:%s' % (data['account']['name'], data['account']['id'])
+        for transaction in data['transactions'].values():
+            date, hour = transaction['created_at'].split('Z')[0].split('T')
+            timestamp = time.strptime(date + " " + hour, '%Y-%m-%d %H:%M:%S')
+
+            assert transaction['amount']['currency'] == 'BTC'
+            btc = transaction['amount']['amount']
+            if 'native_amount' in transaction and transaction['native_amount']['currency'] == 'USD':
+                usd = transaction['native_amount']['amount']
+            if 'network' in transaction:
+                txid = transaction['network'].get('hash')
+                fee_btc = transaction['network'].get('transaction_fee')
+            else:
+                txid = None
+                fee_btc = None
+
+            if transaction['type'] == 'buy':
+                type = 'trade'
+                usd = '-' + usd
+            elif transaction['type'] == 'sell':
+                type = 'trade'
+                usd = '-' + usd
+            elif transaction['type'] in ('send', 'pro_deposit', 'pro_withdrawal', 'vault_deposit', 'vault_withdrawal', 'order', 'exchange_deposit', 'exchange_withdrawal', 'transfer'):
+                if btc[0] == '-':
+                    type = 'withdraw'
+                else:
+                    type = 'deposit'
+            else:
+                raise ValueError('Unknown type: %s' % transaction['type'])
+
+            yield Transaction(
+                id=transaction['id'],
+                account=account,
+                timestamp=timestamp,
+                btc=btc,
+                usd=usd,
+                type=type,
+                info=transaction['details']['title'] + ' ' + transaction['details']['subtitle'],
+                txid=txid)
+
+
 class CoinbaseParser(CsvParser):
     expected_header = r'(User,.*,[0-9a-f]+)|(^Transactions$)'
     started = False
 
     def reset(self):
         self.started = False
+
+    def parse_file(self, filename):
+        if parsed_args.ignore_old_coinbase == 'auto':
+            # Actually reset the argument and fall through to do it just once.
+            new_coinbase_parser = DownloadedCoinbaseParser()
+            for path in parsed_args.histories:
+                if new_coinbase_parser.can_parse(path):
+                    parsed_args.ignore_old_coinbase = 'true'
+                    break
+            else:
+                parsed_args.ignore_old_coinbase = 'false'
+        if parsed_args.ignore_old_coinbase.lower() in ('true', 'yes'):
+            ignore_old_coinbase = True
+        elif parsed_args.ignore_old_coinbase.lower() in ('false', 'no'):
+            ignore_old_coinbase = True
+        else:
+            raise ValueError('Unknown value for ignore_old_coinbase: %s' % parsed_args.ignore_old_coinbase)
+        if not ignore_old_coinbase:
+            yield from super(CoinbaseParser, self).parse_file(filename)
 
     def parse_row(self, row):
         if not self.started:
@@ -1173,6 +1254,8 @@ def parse_all(args):
       MtGoxParser(),
       BitcoindParser(),
       CoinbaseParser(),
+      NewCoinbaseParser(),
+      DownloadedCoinbaseParser(),
       GdaxAccountParser(),
       GdaxFillsParser(),
       ElectrumParser(),
