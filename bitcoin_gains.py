@@ -66,6 +66,8 @@ parser.add_argument("-y", "--non_interactive", help="don't prompt the user to co
 
 parser.add_argument("--consolidate_bitcoind", help="treat bitcoind accounts as one", action="store_true")
 
+parser.add_argument("--consolidate_coinbase", help="treat coinbase accounts as one", action="store_true")
+
 parser.add_argument("--external_transactions_file", default="external_transactions.json")
 
 parser.add_argument("--flat_transactions_file", default="all_transactions.csv")
@@ -384,13 +386,65 @@ class ElectrumParser(CsvParser):
         return transactions
 
 
-class NewCoinbaseParser(TransactionParser):
+class NewCoinbaseParser(CsvParser):
     def can_parse(self, filename):
         first_line = open(filename).readline().strip()
         if 'You can use this transaction report to inform your likely tax obligations' in first_line and 'Coinbase' in first_line:
-            raise RuntimeError(
-                'Insufficient information in new-style coinbase transaction files; '
-                'please use download-coinbase.py instead.')
+            if not parsed_args.consolidate_coinbase:
+                raise RuntimeError(
+                    'New-style coinbase transaction are missing wallet designations; '
+                    'please use download-coinbase.py '
+                    'or pass --consolidate_coinbase to treat all Coinbase wallets as one.'
+                    'WARNING: This report is lacks all transfers to/from Coinbase Pro, '
+                    'and will give incorrect results if there are any such transctions.')
+            else:
+                return True
+
+    def reset(self):
+        self.started = False
+
+    def parse_row(self, row):
+        if not self.started:
+            if row[0] == 'Timestamp':
+                self.header = row
+                self.started = True
+            return None
+
+        data = dict(zip(self.header, row))
+        if data['Asset'] != 'BTC':
+            return None
+        timestamp = time.strptime(data['Timestamp'], '%Y-%m-%dT%H:%M:%SZ')
+        type = data['Transaction Type'].lower()
+        if type in ('paid for an order', 'send'):
+            type = 'withdraw'
+        elif type in ('receive',):
+            type = 'deposit'
+        elif type not in ('buy', 'sell'):
+            raise ValueError('Unknown type of transaction: %s' % type)
+
+        btc = data['Quantity Transacted']
+        usd = data['USD Subtotal'] or 0
+        if not usd:
+            usd = decimal.Decimal(data['USD Spot Price at Transaction']) * decimal.Decimal(btc)
+
+        if type in ('buy',):
+            usd = '-%s' % usd
+        if type in ('sell', 'withdraw'):
+            btc = '-%s' % btc
+        if type in ('buy', 'sell'):
+            type = 'trade'
+
+        info = data.get('Notes')
+        if type == 'withdraw':
+            if data['Transaction Type'] != 'Paid for an order':
+                print('Warning: bitcoin fees not specified for Coinbase %s, may not match external transaction.' % info)
+            fee_btc = 0
+        else:
+            fee_btc = 0
+        fee_usd = data['USD Fees'] or 0
+        account = 'Coinbase:consolidated'
+
+        return Transaction(timestamp, type, btc, usd, fee_btc=fee_btc, fee_usd=fee_usd, account=account, info=info)
 
 
 class DownloadedCoinbaseParser(TransactionParser):
@@ -401,7 +455,10 @@ class DownloadedCoinbaseParser(TransactionParser):
         with open(filename) as fin:
             fin.readline()
             data = json.load(fin)
-        account = 'Coinbase:%s:%s' % (data['account']['name'], data['account']['id'])
+        if parsed_args.consolidate_coinbase:
+            account = 'Coinbase:consolidated'
+        else:
+            account = 'Coinbase:%s:%s' % (data['account']['name'], data['account']['id'])
         for transaction in data['transactions'].values():
             date, hour = transaction['created_at'].split('Z')[0].split('T')
             timestamp = time.strptime(date + " " + hour, '%Y-%m-%d %H:%M:%S')
@@ -447,6 +504,7 @@ class CoinbaseParser(CsvParser):
     started = False
 
     def reset(self):
+        self.account = None
         self.started = False
 
     def parse_file(self, filename):
@@ -470,6 +528,8 @@ class CoinbaseParser(CsvParser):
 
     def parse_row(self, row):
         if not self.started:
+            if row[0] == 'Account':
+                self.account = 'Coinbase:%s:%s' % (row[1], row[2])
             raw_row = ",".join(row)
             if (raw_row.startswith('Timestamp,Balance,')
                 or raw_row.startswith('User,')
@@ -501,8 +561,10 @@ class CoinbaseParser(CsvParser):
             usd = 0
             type = 'deposit' if float(btc) > 0 else 'withdraw'
         info = " ".join([note, to])
-        if True:
-            account = self.filename
+        if parsed_args.consolidate_coinbase:
+            account = 'Coinbase:consolidated'
+        elif True:
+            account = self.account or self.filename
         else:
             account = None
         if re.match('[0-9a-f]{60,64}', row[-1]):
@@ -1272,6 +1334,7 @@ def parse_all(args):
         for parser in parsers:
             if parser.can_parse(file):
                 print(file, parser)
+                parser.reset()
                 for transaction in parser.parse_file(file):
                     transaction.parser = parser
                     if transaction.id is None:
