@@ -640,11 +640,18 @@ class KrakenParser(CsvParser):
         first_line = open(filename).readline().strip()
         if first_line.endswith('"ledgers"'):
             raise ValueError("Use ledger, not trade, export for Kraken.")
+        elif first_line == '"txid","refid","time","type","aclass","asset","amount","fee","balance"':
+            # Old style.
+            return True
         elif first_line == '"txid","refid","time","type","subtype","aclass","asset","amount","fee","balance"':
+            # New style.
             return True
 
     def parse_row(self, row):
-        txid, refid, ktimestamp, ktype, _, _, asset, amount, fee, _ = row
+        if len(row) == 10:
+            txid, refid, ktimestamp, ktype, _, _, asset, amount, fee, _ = row
+        else:
+            txid, refid, ktimestamp, ktype, _, asset, amount, fee, _ = row
         timestamp = time.strptime(ktimestamp, '%Y-%m-%d %H:%M:%S')
         if ktype == 'trade':
             info = self._trades[refid]
