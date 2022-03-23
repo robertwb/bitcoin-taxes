@@ -1,12 +1,12 @@
 Bitcoin Capital Gains Tax Calculator
 ====================================
 
-This is a python script that attempts to calculate your capital gains/losses
+This is a Python script that attempts to calculate your capital gains/losses
 based on your transaction history(ies).
 
 First, a disclaimer: I am not an accountant or otherwise authorized to give tax advice.
 This code is released under the GPL, which in particular disavows all responsibility for the accuracy of these results.
-That being said, I hope it's helpful and I've be using it for years myself.
+That being said, I hope it's helpful and I've been using it for years myself.
 
 Method
 ------
@@ -23,7 +23,7 @@ Among the options for withdrawals, a purchase is taxed as a sale and an expense
 offsets income.  Actual transfers out must be taxed manually when sold externally.
 The suggested "fair market" value for these transfers is pulled from
 https://blockchain.info/charts/market-price.
-When running in interactive mode, user input will be saved in a json file
+When running in interactive mode, user input will be saved in a JSON file
 (defaulting to `external_transactions.json`) and not asked again.
 This file can be edited manually or removed to
 re-evaluate the nature of a transaction.
@@ -52,7 +52,7 @@ Use
 First, download/export all the transaction histories from all your exchanges/wallets.
 Several exchanges (e.g. Bitstamp, Coinbase, Gdax, Kraken, and MtGox) are supported; more formats can be easily added.
 Note that for MtGox both the BTC and USD files must be downloaded (with BTC or USD in the filename) as neither has the full history.
-Transactions exported from your local wallets such as the electrum and the reference client can be imported (e.g. `bitcoin-cli listtransactions '*' 1000000 > local-accounts.json`).
+Transactions exported from your local wallets such as Electrum and Bitcoin Core can be imported (e.g. `bitcoin-cli listtransactions '*' 1000000 > local-accounts.json`).
 Additionally, any set of public addresses (e.g. from a wallet that does not support export)
 can be treated as a single account by simply enumerating them in a text file.
 
