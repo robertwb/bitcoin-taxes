@@ -58,7 +58,7 @@ can be treated as a single account by simply enumerating them in a text file.
 
 Run the script as
 
-    python bitcoin_gains.py transaction_downloads/*.csv local-accounts.json ...
+    python3 bitcoin_gains.py transaction_downloads/*.csv local-accounts.json ...
 
 This script will be interactive, it will ask questions about external transfers.
 To accept all the defaults (as explained above) one can use the `-y` option.
