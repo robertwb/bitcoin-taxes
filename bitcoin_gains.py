@@ -123,7 +123,7 @@ class BitcoindParser(TransactionParser):
             item['fee'] = decimal.Decimal(item.get('fee', 0)).quantize(decimal.Decimal('1e-8'))
             # Include the vout so that atomic payments don't get dropped.
             item['txid'] = item['txid'] + ":" + str(item['vout'])
-            info = ' '.join([item.get('to', ''), item.get('comment', ''), item.get('address', '')])
+            info = ' '.join([item.get('to', ''), item.get('comment', ''), item.get('label', ''), item.get('address', '')])
             if not parsed_args.consolidate_bitcoind:
                 account = ('bitcoind-%s' % item['account']).strip('-')
             else:
