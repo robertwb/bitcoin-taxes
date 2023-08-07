@@ -868,6 +868,7 @@ def strip_or_none(o):
     return o.strip() if o else o
 
 class Transaction(object):
+    # btc and usd exclude the fee.
     def __init__(self, timestamp, type, btc, usd, price=None, fee_usd=0, fee_btc=0, info=None, id=None, account=None, parser=None, txid=None):
         self.timestamp = timestamp
         self.type = type
